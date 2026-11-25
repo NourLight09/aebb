@@ -27,6 +27,7 @@ const tabs = [
   { id: "accueil", label: "Accueil", icon: "⌂" },
   { id: "entraide", label: "Entraide", icon: "♡" },
   { id: "ecoute", label: "Écoute", icon: "◌" },
+  { id: "messagerie", label: "Messagerie", icon: "✉" },
   { id: "espace", label: "Mon espace", icon: "▣" },
   { id: "annuaire", label: "Annuaire privé", icon: "⌕" },
   { id: "ressources", label: "Infos utiles", icon: "＋" },
@@ -946,7 +947,7 @@ export default function Portal({
         setSelectedChatId((current) =>
           current && nextChats.some((chat) => chat.id === current)
             ? current
-            : "",
+            : nextChats[0]?.id || "",
         );
       },
       (error) => {
@@ -1048,14 +1049,18 @@ export default function Portal({
     setAnnouncementImageFile(file);
   }
 
-  async function notifyCommission(eventType, documentId) {
+  async function notifyCommission(eventType, documentId, messageId) {
     const response = await fetch("/api/notify", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${await user.getIdToken()}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ eventType, documentId }),
+      body: JSON.stringify({
+        eventType,
+        documentId,
+        ...(messageId ? { messageId } : {}),
+      }),
     });
     const result = await response.json().catch(() => null);
     if (!response.ok || result?.sent !== true) {
@@ -1103,7 +1108,6 @@ export default function Portal({
     setBusy(true);
     let uploadedImageRef = null;
     let storageSdk = null;
-    const isRequest = announcementForm.type === "demande";
     try {
       const announcementRef = doc(collection(db, "annonces"));
       let imageUrl = "";
@@ -1126,7 +1130,7 @@ export default function Portal({
         description: announcementForm.description.trim(),
         type: announcementForm.type,
         estAnonyme: announcementForm.estAnonyme,
-        statut: isRequest ? "en_attente" : "actif",
+        statut: "en_attente",
         auteurAffiche: announcementForm.estAnonyme
           ? "Membre anonyme AEBB"
           : profile.pseudoAnonyme,
@@ -1149,18 +1153,14 @@ export default function Portal({
         estAnonyme: false,
       });
       removeAnnouncementImage();
-      if (isRequest) {
-        try {
-          await notifyCommission("new-demand", announcementRef.id);
-          showActionMessage("Demande envoyée. Elle sera visible après validation.");
-        } catch (notificationError) {
-          showActionMessage(
-            `Votre demande est enregistrée et en attente de validation, mais le courriel n’a pas été envoyé : ${errorText(notificationError)}`,
-            true,
-          );
-        }
-      } else {
-        showActionMessage("Votre annonce a été publiée.");
+      try {
+        await notifyCommission("new-announcement", announcementRef.id);
+        showActionMessage("Annonce envoyée. Elle sera visible après validation.");
+      } catch (notificationError) {
+        showActionMessage(
+          `Votre annonce est enregistrée et en attente de validation, mais le courriel n’a pas été envoyé : ${errorText(notificationError)}`,
+          true,
+        );
       }
     } catch (error) {
       let message = errorText(error);
@@ -1185,7 +1185,7 @@ export default function Portal({
         status === "resolu"
           ? "Annonce clôturée."
           : item.statut === "en_attente"
-            ? "Demande validée et publiée."
+            ? "Annonce validée et publiée."
             : "Annonce réactivée.",
       );
     } catch (error) {
@@ -1212,7 +1212,7 @@ export default function Portal({
     );
     if (existingChat) {
       setSelectedChatId(existingChat.id);
-      setActiveTab("espace");
+      setActiveTab("messagerie");
       showActionMessage("Votre conversation anonyme avec la commission est ouverte.");
       return;
     }
@@ -1233,16 +1233,8 @@ export default function Portal({
         updatedAt: serverTimestamp(),
       });
       setSelectedChatId(chatRef.id);
-      setActiveTab("espace");
-      try {
-        await notifyCommission("new-chat", chatRef.id);
-        showActionMessage("Votre conversation anonyme avec la commission a été créée.");
-      } catch (notificationError) {
-        showActionMessage(
-          `Votre conversation est créée, mais la commission n’a pas été prévenue par courriel : ${errorText(notificationError)}`,
-          true,
-        );
-      }
+      setActiveTab("messagerie");
+      showActionMessage("Conversation créée. Envoyez votre message pour prévenir la commission par courriel.");
     } catch (error) {
       const message = error.code === "permission-denied"
         ? "Firebase a refusé la création. Vérifiez que le compte étudiant possède un profil Firestore et que les règles Firestore sont publiées sur le projet aebb-78847."
@@ -1278,6 +1270,15 @@ export default function Portal({
         updatedAt: serverTimestamp(),
       });
       await batch.commit();
+      if (profile.role === "etudiant") {
+        try {
+          await notifyCommission("new-message", selectedChat.id, messageRef.id);
+        } catch (notificationError) {
+          setMessagesError(
+            `Votre message est envoyé, mais le courriel de notification n’a pas été envoyé : ${errorText(notificationError)}`,
+          );
+        }
+      }
     } catch (error) {
       setMessageDraft(text);
       setMessagesError(errorText(error));
@@ -1605,7 +1606,7 @@ export default function Portal({
           <section className="card space-section moderation-queue">
             <div className="space-section-heading">
               <div>
-                <h3>Demandes en attente de validation</h3>
+                <h3>Annonces en attente de validation</h3>
                 <span className="muted">{pendingAnnouncements.length} à examiner</span>
               </div>
             </div>
@@ -1614,7 +1615,7 @@ export default function Portal({
                 {pendingAnnouncements.map((item) => renderAnnouncementCard(item))}
               </div>
             ) : (
-              <p className="muted">Aucune demande à valider pour le moment.</p>
+              <p className="muted">Aucune annonce à valider pour le moment.</p>
             )}
           </section>
         )}
@@ -1641,11 +1642,9 @@ export default function Portal({
                 <option value="demande">Je cherche de l’aide / un objet</option>
               </select>
             </label>
-            {announcementForm.type === "demande" && (
-              <p className="muted">
-                Votre demande sera visible après validation par un membre habilité.
-              </p>
-            )}
+            <p className="muted">
+              Toutes les annonces, dons comme demandes, seront visibles après validation par un membre habilité.
+            </p>
             <label>
               Description
               <textarea
@@ -1688,7 +1687,7 @@ export default function Portal({
             <FormError>{actionError}</FormError>
             {actionNotice && <p className="success-message" role="status">{actionNotice}</p>}
             <button className="button button-primary" disabled={busy} type="submit">
-              {busy ? "Publication…" : "Publier l’annonce"}
+              {busy ? "Envoi…" : "Envoyer pour validation"}
             </button>
           </form>
         </section>
@@ -1739,7 +1738,7 @@ export default function Portal({
               onClick={startChat}
               type="button"
             >
-              {chatsLoading ? "Chargement…" : "Écrire anonymement"}
+              {chatsLoading ? "Chargement…" : "Démarrer / reprendre la discussion"}
             </button>
           ) : null}
         />
@@ -1891,41 +1890,36 @@ export default function Portal({
     );
   }
 
-  function renderMySpace() {
+  function renderMessages() {
     return (
       <div className="page-content">
         <PanelHeading
-          eyebrow="Votre suivi"
-          title="Mon espace"
-          description="Retrouvez vos annonces, vos conversations et vos propositions solidaires."
+          eyebrow={isPrivileged ? "Commission sociale" : "Votre suivi"}
+          title={isPrivileged ? "Boîte de réception" : "Messagerie"}
+          description={isPrivileged
+            ? "Les conversations anonymes des étudiants arrivent ici. Toute la commission peut les consulter et y répondre."
+            : "Votre conversation privée avec la commission sociale."}
+          action={profile.role === "etudiant" ? (
+            <button className="button button-small button-primary" disabled={busy || chatsLoading} onClick={startChat} type="button">
+              {chatsLoading ? "Chargement…" : "Écrire anonymement"}
+            </button>
+          ) : <span className="role-pill">Accès commission</span>}
         />
         <section className="card space-section">
           <div className="space-section-heading">
-            <div><h3>Mes annonces</h3><span className="muted">{myAnnouncements.length} au total</span></div>
-            <button className="text-button" onClick={() => setActiveTab("entraide")} type="button">Nouvelle annonce →</button>
-          </div>
-          {myAnnouncements.length ? (
-            <div className="announcement-grid">
-              {myAnnouncements.map((item) => renderAnnouncementCard(item, true))}
-            </div>
-          ) : (
-            <p className="muted">Vous n’avez pas encore publié d’annonce.</p>
-          )}
-        </section>
-
-        <section className="card space-section">
-          <div className="space-section-heading">
             <div>
-              <h3>{profile.role === "etudiant" ? "Mes conversations" : "Boîte anonyme de la commission"}</h3>
+              <h3>{isPrivileged ? "Conversations étudiantes" : "Ma conversation"}</h3>
               <span className="muted">{chats.length} conversation(s)</span>
             </div>
           </div>
           <FormError>{chatsError}</FormError>
-          {chats.length === 0 ? (
+          {chatsLoading ? (
+            <p className="muted">Chargement des conversations…</p>
+          ) : chats.length === 0 ? (
             <p className="muted">
-              {profile.role === "etudiant"
-                ? "Votre conversation anonyme avec la commission apparaîtra ici."
-                : "Les messages anonymes des étudiants apparaîtront ici."}
+              {isPrivileged
+                ? "Aucune conversation reçue pour le moment."
+                : "Aucune conversation pour le moment. Utilisez « Écrire anonymement » pour contacter la commission."}
             </p>
           ) : (
             <div className="chat-layout">
@@ -1937,7 +1931,7 @@ export default function Portal({
                     onClick={() => setSelectedChatId(chat.id)}
                     type="button"
                   >
-                    <strong>{profile.role === "etudiant" ? "Commission sociale" : chat.etudiantPseudo}</strong>
+                    <strong>{isPrivileged ? chat.etudiantPseudo : "Commission sociale"}</strong>
                     <span>{chat.dernierMessage || "Conversation démarrée"}</span>
                     <small>{formatDate(chat.updatedAt)}</small>
                   </button>
@@ -1947,7 +1941,7 @@ export default function Portal({
                 <div className="chat-window">
                   <div className="chat-window-heading">
                     <div>
-                      <strong>{profile.role === "etudiant" ? "Commission sociale" : selectedChat.etudiantPseudo}</strong>
+                      <strong>{isPrivileged ? selectedChat.etudiantPseudo : "Commission sociale"}</strong>
                       <small>{selectedChat.identiteRevelee ? `Identité révélée · ${selectedChat.telephoneRevele}` : "Conversation anonyme"}</small>
                     </div>
                     {profile.role === "etudiant" && !selectedChat.identiteRevelee && (
@@ -1958,9 +1952,9 @@ export default function Portal({
                     {messagesLoading && <p className="muted">Chargement des messages…</p>}
                     {!messagesLoading && messages.length === 0 && (
                       <p className="muted">
-                        {profile.role === "etudiant"
-                          ? "Écrivez à la commission. Un membre habilité vous répondra ici."
-                          : "Répondez à l’étudiant sous le nom « Commission sociale »."}
+                        {isPrivileged
+                          ? "Répondez à l’étudiant sous le nom « Commission sociale »."
+                          : "Écrivez à la commission. Un membre habilité vous répondra ici."}
                       </p>
                     )}
                     {messages.map((message) => {
@@ -1996,7 +1990,7 @@ export default function Portal({
                     />
                     <button className="button button-primary" disabled={!messageDraft.trim()} type="submit">Envoyer</button>
                   </form>
-                  {profile.role !== "etudiant" && selectedChat.identiteRevelee && (
+                  {isPrivileged && selectedChat.identiteRevelee && (
                     <p className="revealed-notice">Numéro communiqué avec l’accord de l’étudiant : {selectedChat.telephoneRevele}</p>
                   )}
                 </div>
@@ -2004,6 +1998,54 @@ export default function Portal({
                 <div className="chat-placeholder"><p className="muted">Sélectionnez une conversation pour afficher les messages.</p></div>
               )}
             </div>
+          )}
+        </section>
+      </div>
+    );
+  }
+
+  function renderMySpace() {
+    return (
+      <div className="page-content">
+        <PanelHeading
+          eyebrow="Votre suivi"
+          title="Mon espace"
+          description="Retrouvez vos annonces et vos propositions solidaires."
+          action={<button className="button button-small button-primary" onClick={() => setActiveTab("messagerie")} type="button">
+            Ouvrir la messagerie
+          </button>}
+        />
+        <section className="card space-section">
+          <div className="space-section-heading">
+            <div><h3>Mes annonces</h3><span className="muted">{myAnnouncements.length} au total</span></div>
+            <button className="text-button" onClick={() => setActiveTab("entraide")} type="button">Nouvelle annonce →</button>
+          </div>
+          {myAnnouncements.length ? (
+            <div className="announcement-grid">
+              {myAnnouncements.map((item) => renderAnnouncementCard(item, true))}
+            </div>
+          ) : (
+            <p className="muted">Vous n’avez pas encore publié d’annonce.</p>
+          )}
+        </section>
+
+        <section className="card space-section">
+          <div className="space-section-heading">
+            <div>
+              <h3>Messagerie</h3>
+              <span className="muted">{chats.length} conversation(s)</span>
+            </div>
+            <button className="button button-small button-secondary" onClick={() => setActiveTab("messagerie")} type="button">
+              Ouvrir les messages
+            </button>
+          </div>
+          {chatsError && <FormError>{chatsError}</FormError>}
+          {!chatsError && chats.length === 0 && (
+            <p className="muted">
+              {isPrivileged
+                ? "Les messages anonymes des étudiants apparaîtront ici."
+                : "Votre conversation avec la commission apparaîtra ici."}
+            </p>
           )}
         </section>
 
@@ -2132,7 +2174,29 @@ export default function Portal({
           description="Réservez les rôles habilités aux membres qui en ont réellement besoin."
           action={<span className="role-pill">Administrateur</span>}
         />
+        <section className="card space-section">
+          <div className="space-section-heading">
+            <div>
+              <h3>À traiter</h3>
+              <p className="muted">Accès direct aux annonces à valider et à la boîte de réception anonyme.</p>
+            </div>
+          </div>
+          <div className="card-actions">
+            <button className="button button-small button-primary" onClick={() => setActiveTab("entraide")} type="button">
+              Annonces à valider ({pendingAnnouncements.length})
+            </button>
+            <button className="button button-small button-secondary" onClick={() => setActiveTab("messagerie")} type="button">
+              Ouvrir la messagerie ({chats.length})
+            </button>
+          </div>
+        </section>
         <section className="card admin-card">
+          <div className="space-section-heading">
+            <div>
+              <h3>Comptes utilisateurs</h3>
+              <span className="muted">{members.length} compte(s), actualisés en direct</span>
+            </div>
+          </div>
           {membersError && <FormError>{membersError}</FormError>}
           {membersLoading ? <p className="muted">Chargement des comptes…</p> : (
             <div className="member-list">
@@ -2210,17 +2274,17 @@ export default function Portal({
       ? [
           { icon: "♙", count: members.length, label: "comptes", tab: "admin" },
           { icon: "♡", count: activeAnnouncements.length, label: "annonces actives", tab: "entraide" },
-          { icon: "◷", count: pendingAnnouncements.length, label: "demandes à valider", tab: "entraide" },
-          { icon: "▣", count: chats.length, label: "conversations", tab: "espace" },
+          { icon: "◷", count: pendingAnnouncements.length, label: "annonces à valider", tab: "entraide" },
+          { icon: "▣", count: chats.length, label: "conversations", tab: "messagerie" },
         ]
       : isPrivileged
         ? [
-            { icon: "▣", count: chats.length, label: "conversations à suivre", tab: "espace" },
-            { icon: "◷", count: pendingAnnouncements.length, label: "demandes à valider", tab: "entraide" },
+            { icon: "▣", count: chats.length, label: "conversations à suivre", tab: "messagerie" },
+            { icon: "◷", count: pendingAnnouncements.length, label: "annonces à valider", tab: "entraide" },
           ]
         : [
             { icon: "♡", count: myAnnouncements.length, label: "mes annonces", tab: "espace" },
-            { icon: "▣", count: chats.length, label: "mes conversations", tab: "espace" },
+            { icon: "▣", count: chats.length, label: "mes conversations", tab: "messagerie" },
             { icon: "⌕", count: myDirectoryEntries.length, label: "mes propositions", tab: "espace" },
           ];
     const dashboardDescription = isAdmin
@@ -2231,19 +2295,20 @@ export default function Portal({
     const dashboardActions = isAdmin
       ? [
           { label: "Gérer les rôles", tab: "admin" },
+          { label: "Ouvrir la messagerie", tab: "messagerie" },
           { label: "Ouvrir l’annuaire privé", tab: "annuaire" },
-          { label: "Voir les annonces", tab: "entraide" },
+          { label: "Valider les annonces", tab: "entraide" },
         ]
       : isPrivileged
         ? [
-            { label: "Ouvrir les conversations", tab: "espace" },
+            { label: "Ouvrir les conversations", tab: "messagerie" },
             { label: "Consulter l’annuaire privé", tab: "annuaire" },
             { label: "Modérer les annonces", tab: "entraide" },
           ]
         : [
             { label: "Publier une annonce", tab: "entraide" },
             { label: "Proposer mon aide", tab: "annuaire" },
-            { label: "Parler à la commission", tab: "ecoute" },
+            { label: "Écrire anonymement à la commission", tab: "messagerie" },
           ];
 
     return (
@@ -2298,6 +2363,7 @@ export default function Portal({
   function renderContent() {
     if (activeTab === "entraide") return renderAnnouncements();
     if (activeTab === "ecoute") return renderEcoute();
+    if (activeTab === "messagerie") return renderMessages();
     if (activeTab === "espace") return renderMySpace();
     if (activeTab === "annuaire") return renderDirectory();
     if (activeTab === "admin" && isAdmin) return renderAdmin();
@@ -2346,7 +2412,7 @@ export default function Portal({
               >
                 <span aria-hidden="true">{tab.icon}</span>
                 <span>{tab.id === "annuaire" && !isPrivileged ? "Proposer mon aide" : tab.label}</span>
-                {tab.id === "espace" && chats.length > 0 && <span className="nav-count">{chats.length}</span>}
+                {tab.id === "messagerie" && chats.length > 0 && <span className="nav-count">{chats.length}</span>}
               </a>
             ))}
           </nav>

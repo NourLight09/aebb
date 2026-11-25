@@ -14,12 +14,20 @@ publier, gérer ses annonces ou démarrer une conversation anonyme avec la commi
 - `/entraide`, `/ecoute` et `/infos-utiles` : pages publiques séparées, consultables sans compte.
 - `/connexion` et `/inscription` : accès et création de compte.
 - `/dashboard` : tableau de bord connecté avec sidebar et pages dédiées pour
-  l’entraide, l’écoute, l’espace personnel, l’annuaire, les ressources et
-  l’administration selon le rôle.
+  l’entraide, l’écoute, la messagerie, l’espace personnel, l’annuaire, les
+  ressources et l’administration selon le rôle.
 
 Les membres de la commission renseignent leur nom, leur rôle, leur numéro de
 contact et téléversent leur portrait dans **Tableau de bord → Écoute**. Ces
 coordonnées et photos sont affichées publiquement sur `/ecoute`.
+Les étudiants peuvent démarrer ou reprendre leur discussion anonyme depuis
+**Tableau de bord → Messagerie** ou **Écoute**. Les membres de la commission et
+les admins consultent la boîte commune directement dans **Messagerie**. Les
+admins disposent également d’un accès depuis **Administration**. Chaque nouveau
+message étudiant déclenche un courriel à la commission, mais le contenu du
+message n’est jamais inclus dans le courriel.
+La liste des utilisateurs (numéro, pseudo et rôle) est réservée au rôle `admin`
+et se met à jour en direct.
 Les conversations démarrées sur le site sont adressées à la boîte commune
 « Commission sociale » : l’étudiant ne choisit pas le membre qui répond, et les
 réponses sont affichées sous ce nom générique. Tous les comptes `commission` et
@@ -31,11 +39,11 @@ pour répondre dans la boîte anonyme.
 
 ## Validation des demandes et notifications
 
-Les nouvelles annonces de type **demande** restent privées avec le statut
-`en_attente` jusqu’à validation par un compte `commission` ou `admin`, dans
-**Tableau de bord → Entraide → Demandes en attente de validation**. Les dons
-proposés (`don`) sont publiés immédiatement. Les demandes déjà publiées avant
-ce changement ne sont pas retirées rétroactivement.
+Toutes les nouvelles annonces — dons proposés et demandes — restent privées
+avec le statut `en_attente` jusqu’à validation par un compte `commission` ou
+`admin`, dans **Tableau de bord → Entraide → Annonces en attente de validation**.
+Les annonces déjà publiées avant ce changement ne sont pas retirées
+rétroactivement.
 
 Les e-mails passent par une fonction Vercel (`/api/notify`) qui appelle l’API
 EmailJS; aucune Cloud Function Firebase ni activation du plan Blaze n’est
@@ -50,9 +58,10 @@ d’environnement Vercel, renseignez :
 
 Les variables `VITE_FIREBASE_API_KEY` et `VITE_FIREBASE_PROJECT_ID` doivent
 également être configurées comme pour l’application. Ne préfixez jamais la clé
-privée EmailJS par `VITE_` et ne la commitez pas. Les messages envoyés à la
-commission signalent seulement une demande à valider ou une nouvelle discussion;
-ils ne contiennent ni le texte du chat ni le numéro de l’étudiant. Les quotas
+privée EmailJS par `VITE_` et ne la commitez pas. Les courriels signalent une
+annonce à valider ou un nouveau message étudiant; ils ne contiennent ni le texte
+du chat ni le numéro de l’étudiant. Aucun courriel n’est envoyé lorsqu’un
+étudiant ouvre simplement une conversation sans encore écrire. Les quotas
 dépendent de l’offre EmailJS choisie. Les e-mails ne sont pas envoyés par le
 serveur Vite local : ils nécessitent le déploiement de la fonction sur Vercel.
 

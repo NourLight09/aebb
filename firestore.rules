@@ -122,10 +122,7 @@ service cloud.firestore {
           'auteurAffiche', 'contactPublic', 'createdAt', 'imageUrl'
         ])
         && request.resource.data.type in ['don', 'demande']
-        && ((request.resource.data.type == 'demande'
-            && request.resource.data.statut == 'en_attente')
-          || (request.resource.data.type == 'don'
-            && request.resource.data.statut == 'actif'))
+        && request.resource.data.statut == 'en_attente'
         && request.resource.data.estAnonyme is bool
         && request.resource.data.createdAt == request.time
         && (
@@ -133,7 +130,10 @@ service cloud.firestore {
             && request.resource.data.contactPublic == null
             && request.resource.data.auteurAffiche == 'Membre anonyme AEBB')
           || (request.resource.data.estAnonyme == false
-            && request.resource.data.contactPublic is string)
+            && request.resource.data.contactPublic
+              == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.telephone
+            && request.resource.data.auteurAffiche
+              == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.pseudoAnonyme)
         )
         && request.resource.data.titre is string
         && request.resource.data.titre.size() > 0

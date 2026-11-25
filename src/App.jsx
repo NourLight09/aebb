@@ -8,8 +8,7 @@ import {
 import {
   collection,
   doc,
-  getDoc,
-  getDocs,
+  onSnapshot,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -47,7 +46,6 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState("");
-  const [profileVersion, setProfileVersion] = useState(0);
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [formError, setFormError] = useState("");
@@ -125,63 +123,60 @@ export default function App() {
     if (!user || !db) {
       setProfile(null);
       setProfileLoading(false);
+      setProfileError("");
       return undefined;
     }
 
-    let active = true;
     setProfileLoading(true);
-    getDoc(doc(db, "users", user.uid))
-      .then((snapshot) => {
-        if (!active) return;
+    setProfileError("");
+    return onSnapshot(
+      doc(db, "users", user.uid),
+      (snapshot) => {
         if (!snapshot.exists()) {
+          setProfile(null);
           setProfileError(
             "Votre compte existe, mais son profil est introuvable. Contactez un administrateur.",
           );
+          setProfileLoading(false);
           return;
         }
         setProfile(snapshot.data());
         setProfileError("");
-      })
-      .catch((error) => {
-        if (active) setProfileError(getErrorMessage(error));
-      })
-      .finally(() => {
-        if (active) setProfileLoading(false);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [user, profileVersion]);
+        setProfileLoading(false);
+      },
+      (error) => {
+        setProfileError(getErrorMessage(error));
+        setProfileLoading(false);
+      },
+    );
+  }, [user]);
 
   useEffect(() => {
     if (!profile || profile.role !== "admin" || !db) {
       setMembers([]);
+      setMembersError("");
+      setMembersLoading(false);
       return undefined;
     }
 
-    let active = true;
     setMembersLoading(true);
     setMembersError("");
-    getDocs(collection(db, "users"))
-      .then((snapshot) => {
-        if (!active) return;
+    return onSnapshot(
+      collection(db, "users"),
+      (snapshot) => {
         setMembers(
           snapshot.docs
             .map((memberDoc) => ({ id: memberDoc.id, ...memberDoc.data() }))
             .sort((a, b) => (a.telephone || "").localeCompare(b.telephone || "")),
         );
-      })
-      .catch((error) => {
-        if (active) setMembersError(getErrorMessage(error));
-      })
-      .finally(() => {
-        if (active) setMembersLoading(false);
-      });
-
-    return () => {
-      active = false;
-    };
+        setMembersError("");
+        setMembersLoading(false);
+      },
+      (error) => {
+        setMembersError(getErrorMessage(error));
+        setMembersLoading(false);
+      },
+    );
   }, [profile]);
 
   async function handleSubmit(event) {
@@ -214,7 +209,6 @@ export default function App() {
             `Compte créé, mais profil non enregistré (${getErrorMessage(error)}). Contactez un administrateur.`,
           );
         }
-        setProfileVersion((version) => version + 1);
       } else {
         await signInWithEmailAndPassword(auth, email, password);
       }

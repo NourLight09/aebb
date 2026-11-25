@@ -51,10 +51,13 @@ export default async function handler(request, response) {
     return response.status(401).json({ error: "Connexion requise." });
   }
 
-  const { eventType, documentId } = request.body || {};
-  if (!["new-demand", "new-chat"].includes(eventType)
+  const { eventType, documentId, messageId } = request.body || {};
+  if (!["new-announcement", "new-message"].includes(eventType)
     || typeof documentId !== "string"
-    || !/^[A-Za-z0-9_-]{1,128}$/.test(documentId)) {
+    || !/^[A-Za-z0-9_-]{1,128}$/.test(documentId)
+    || (eventType === "new-message"
+      && (typeof messageId !== "string"
+        || !/^[A-Za-z0-9_-]{1,128}$/.test(messageId)))) {
     return response.status(400).json({ error: "Demande de notification invalide." });
   }
 
@@ -76,13 +79,13 @@ export default async function handler(request, response) {
     const uid = await verifyUser(idToken, apiKey);
     const profile = await readFirestoreDocument(projectId, `users/${uid}`, idToken);
     const role = field(profile, "role");
-    if ((eventType === "new-chat" && role !== "etudiant")
-      || (eventType === "new-demand"
+    if ((eventType === "new-message" && role !== "etudiant")
+      || (eventType === "new-announcement"
         && !["etudiant", "commission", "admin"].includes(role))) {
       throw apiError(403, "Ce compte n’est pas autorisé à déclencher cette notification.");
     }
 
-    if (eventType === "new-demand") {
+    if (eventType === "new-announcement") {
       const announcement = await readFirestoreDocument(
         projectId,
         `annonces/${documentId}`,
@@ -93,7 +96,7 @@ export default async function handler(request, response) {
         `annonces/${documentId}/prive/contact`,
         idToken,
       );
-      if (field(announcement, "type") !== "demande"
+      if (!["don", "demande"].includes(field(announcement, "type"))
         || field(announcement, "statut") !== "en_attente"
         || field(privateContact, "auteurId") !== uid
         || !isRecent(announcement)) {
@@ -101,17 +104,24 @@ export default async function handler(request, response) {
       }
     } else {
       const chat = await readFirestoreDocument(projectId, `chats/${documentId}`, idToken);
+      const message = await readFirestoreDocument(
+        projectId,
+        `chats/${documentId}/messages/${messageId}`,
+        idToken,
+      );
       if (field(chat, "etudiantId") !== uid
         || field(chat, "destinataireType") !== "commission"
-        || !isRecent(chat)) {
-        throw apiError(403, "Cette conversation ne peut pas déclencher de notification.");
+        || field(message, "senderType") !== "etudiant"
+        || field(message, "senderId") !== uid
+        || !isRecent(message)) {
+        throw apiError(403, "Ce message ne peut pas déclencher de notification.");
       }
     }
 
-    const subject = eventType === "new-demand"
-      ? "AEBB — demande à valider"
-      : "AEBB — nouvelle discussion anonyme";
-    const dashboardPath = eventType === "new-demand"
+    const subject = eventType === "new-announcement"
+      ? "AEBB — annonce à valider"
+      : "AEBB — nouveau message anonyme";
+    const dashboardPath = eventType === "new-announcement"
       ? "/dashboard/entraide"
       : "/dashboard/espace";
     const portalBaseUrl = process.env.AEBB_PORTAL_URL
@@ -119,9 +129,9 @@ export default async function handler(request, response) {
     const portalLink = portalBaseUrl
       ? `${portalBaseUrl.replace(/\/+$/, "")}${dashboardPath}`
       : "";
-    const action = eventType === "new-demand"
-      ? "Une nouvelle demande attend la validation d’un membre habilité."
-      : "Un étudiant a ouvert une discussion anonyme avec la commission.";
+    const action = eventType === "new-announcement"
+      ? "Une nouvelle annonce (don ou demande) attend la validation d’un membre habilité."
+      : "Un étudiant a envoyé un nouveau message anonyme à la commission.";
     const emailResponse = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
       method: "POST",
       headers: {
