@@ -1,0 +1,36 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function canManageCommissionPhoto(userId) {
+      return request.auth != null
+        && request.auth.uid == userId
+        && firestore.get(/databases/(default)/documents/users/$(userId)).data.role
+          in ['commission', 'admin'];
+    }
+
+    match /annonces/{userId}/{announcementId} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType
+          in ['image/jpeg', 'image/png', 'image/webp'];
+      allow update: if false;
+      allow delete: if request.auth != null
+        && request.auth.uid == userId;
+    }
+
+    match /commission/{userId}/{photoId} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if canManageCommissionPhoto(userId)
+        && photoId.matches('^[A-Za-z0-9_-]+$')
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType
+          in ['image/jpeg', 'image/png', 'image/webp'];
+      allow delete: if request.auth != null
+        && request.auth.uid == userId;
+    }
+  }
+}

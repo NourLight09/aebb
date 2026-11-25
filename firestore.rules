@@ -1,0 +1,386 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function ownAccount(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function accountRole(userId) {
+      return get(/databases/$(database)/documents/users/$(userId)).data.role;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && accountRole(request.auth.uid) == 'admin';
+    }
+
+    function isCommission() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && accountRole(request.auth.uid) in ['commission', 'admin'];
+    }
+
+    function ownsAnnouncement(annonceId) {
+      let contactPath = /databases/$(database)/documents/annonces/$(annonceId)/prive/contact;
+      return signedIn()
+        && exists(contactPath)
+        && get(contactPath).data.auteurId == request.auth.uid;
+    }
+
+    function isChatParticipant(chatId) {
+      let chat = get(/databases/$(database)/documents/chats/$(chatId)).data;
+      return signedIn()
+        && (request.auth.uid == chat.etudiantId
+          || isCommission()
+          || request.auth.uid == chat.referentId
+          || isAdmin());
+    }
+
+    match /users/{userId} {
+      allow create: if ownAccount(userId)
+        && request.resource.data.keys().hasOnly([
+          'telephone', 'role', 'pseudoAnonyme', 'createdAt'
+        ])
+        && request.resource.data.role == 'etudiant'
+        && request.resource.data.telephone is string
+        && request.resource.data.telephone.matches('^0[1-9][0-9]{8}$')
+        && request.resource.data.pseudoAnonyme is string
+        && request.resource.data.pseudoAnonyme.size() <= 40
+        && request.resource.data.createdAt == request.time;
+
+      allow read: if ownAccount(userId) || isAdmin();
+
+      allow update: if (
+          ownAccount(userId)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['pseudoAnonyme'])
+        ) || (
+          isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role'])
+          && request.resource.data.role in ['etudiant', 'commission', 'admin']
+        );
+
+      allow delete: if false;
+
+      match /mes_annonces/{annonceId} {
+        allow read: if ownAccount(userId);
+        allow create: if ownAccount(userId)
+          && request.resource.data.keys().hasOnly(['createdAt'])
+          && request.resource.data.createdAt == request.time
+          && existsAfter(/databases/$(database)/documents/annonces/$(annonceId))
+          && getAfter(/databases/$(database)/documents/annonces/$(annonceId)/prive/contact)
+            .data.auteurId == request.auth.uid;
+        allow update, delete: if false;
+      }
+
+      match /mes_inscriptions/{entryId} {
+        allow read: if ownAccount(userId);
+        allow create: if ownAccount(userId)
+          && request.resource.data.keys().hasOnly([
+            'type', 'quartier', 'details', 'disponible', 'createdAt'
+          ])
+          && request.resource.data.createdAt == request.time
+          && existsAfter(/databases/$(database)/documents/annuaire_solidaire/$(entryId))
+          && getAfter(/databases/$(database)/documents/annuaire_solidaire/$(entryId))
+            .data.userId == request.auth.uid
+          && getAfter(/databases/$(database)/documents/annuaire_solidaire/$(entryId))
+            .data.type == request.resource.data.type
+          && getAfter(/databases/$(database)/documents/annuaire_solidaire/$(entryId))
+            .data.quartier == request.resource.data.quartier
+          && getAfter(/databases/$(database)/documents/annuaire_solidaire/$(entryId))
+            .data.details == request.resource.data.details
+          && getAfter(/databases/$(database)/documents/annuaire_solidaire/$(entryId))
+            .data.disponible == request.resource.data.disponible;
+        allow update: if ownAccount(userId)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['disponible'])
+          && request.resource.data.disponible is bool
+          && getAfter(/databases/$(database)/documents/annuaire_solidaire/$(entryId))
+            .data.disponible == request.resource.data.disponible;
+        allow delete: if ownAccount(userId)
+          && !existsAfter(/databases/$(database)/documents/annuaire_solidaire/$(entryId));
+      }
+    }
+
+    match /annonces/{annonceId} {
+      allow read: if isCommission()
+        || resource.data.statut in ['actif', 'resolu']
+        || ownsAnnouncement(annonceId);
+
+      allow create: if signedIn()
+        && accountRole(request.auth.uid) in ['etudiant', 'commission', 'admin']
+        && existsAfter(/databases/$(database)/documents/annonces/$(annonceId)/prive/contact)
+        && getAfter(/databases/$(database)/documents/annonces/$(annonceId)/prive/contact)
+          .data.auteurId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'titre', 'description', 'type', 'estAnonyme', 'statut',
+          'auteurAffiche', 'contactPublic', 'createdAt', 'imageUrl'
+        ])
+        && request.resource.data.type in ['don', 'demande']
+        && ((request.resource.data.type == 'demande'
+            && request.resource.data.statut == 'en_attente')
+          || (request.resource.data.type == 'don'
+            && request.resource.data.statut == 'actif'))
+        && request.resource.data.estAnonyme is bool
+        && request.resource.data.createdAt == request.time
+        && (
+          (request.resource.data.estAnonyme == true
+            && request.resource.data.contactPublic == null
+            && request.resource.data.auteurAffiche == 'Membre anonyme AEBB')
+          || (request.resource.data.estAnonyme == false
+            && request.resource.data.contactPublic is string)
+        )
+        && request.resource.data.titre is string
+        && request.resource.data.titre.size() > 0
+        && request.resource.data.titre.size() <= 100
+        && request.resource.data.description is string
+        && request.resource.data.description.size() > 0
+        && request.resource.data.description.size() <= 2000
+        && (!('imageUrl' in request.resource.data)
+          || (request.resource.data.imageUrl is string
+            && request.resource.data.imageUrl.size() <= 2048));
+
+      allow update: if signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['statut'])
+        && request.resource.data.statut in ['actif', 'resolu']
+        && (isCommission()
+          || (ownsAnnouncement(annonceId)
+            && resource.data.statut != 'en_attente'));
+
+      allow delete: if false;
+
+      match /prive/contact {
+        allow read: if signedIn()
+          && (resource.data.auteurId == request.auth.uid
+            || isCommission());
+
+        allow create: if signedIn()
+          && existsAfter(/databases/$(database)/documents/annonces/$(annonceId))
+          && request.resource.data.keys().hasOnly(['auteurId', 'telephoneReel'])
+          && request.resource.data.auteurId == request.auth.uid
+          && request.resource.data.telephoneReel is string
+          && request.resource.data.telephoneReel
+            == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.telephone;
+
+        allow update: if false;
+        allow delete: if false;
+      }
+    }
+
+    match /commission_public/{memberId} {
+      allow read: if true;
+      allow create, update: if ownAccount(memberId)
+        && accountRole(memberId) in ['commission', 'admin']
+        && request.resource.data.keys().hasOnly([
+          'nom', 'fonction', 'telephoneWhatsApp', 'photoUrl', 'photoId', 'updatedAt'
+        ])
+        && request.resource.data.nom is string
+        && request.resource.data.nom.size() > 0
+        && request.resource.data.nom.size() <= 80
+        && request.resource.data.fonction is string
+        && request.resource.data.fonction.size() > 0
+        && request.resource.data.fonction.size() <= 120
+        && request.resource.data.telephoneWhatsApp is string
+        && request.resource.data.telephoneWhatsApp.size() >= 8
+        && request.resource.data.telephoneWhatsApp.size() <= 20
+        && (!('photoUrl' in request.resource.data)
+          || (request.resource.data.photoUrl is string
+            && request.resource.data.photoUrl.size() <= 2048
+            && (request.resource.data.photoUrl.size() == 0
+              || request.resource.data.photoUrl.matches('^https://.+$'))))
+        && (!('photoId' in request.resource.data)
+          || (request.resource.data.photoId is string
+            && request.resource.data.photoId.size() <= 128
+            && (request.resource.data.photoId.size() == 0
+              || request.resource.data.photoId.matches('^[A-Za-z0-9_-]+$'))))
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isAdmin();
+    }
+
+    match /demo_annonces/{annonceId} {
+      allow read: if true;
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          'titre', 'description', 'type', 'estAnonyme', 'statut',
+          'auteurAffiche', 'contactPublic', 'createdAt', 'demo'
+        ])
+        && request.resource.data.demo == true
+        && request.resource.data.type in ['don', 'demande']
+        && request.resource.data.estAnonyme is bool
+        && request.resource.data.statut in ['actif', 'resolu']
+        && request.resource.data.auteurAffiche is string
+        && request.resource.data.auteurAffiche.size() > 0
+        && request.resource.data.auteurAffiche.size() <= 100
+        && request.resource.data.contactPublic == null
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.titre is string
+        && request.resource.data.titre.size() > 0
+        && request.resource.data.titre.size() <= 100
+        && request.resource.data.description is string
+        && request.resource.data.description.size() > 0
+        && request.resource.data.description.size() <= 2000;
+      allow delete: if isAdmin() && resource.data.demo == true;
+    }
+
+    match /demo_commission_public/{memberId} {
+      allow read: if true;
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['nom', 'fonction', 'demo'])
+        && request.resource.data.demo == true
+        && request.resource.data.nom is string
+        && request.resource.data.nom.size() > 0
+        && request.resource.data.nom.size() <= 100
+        && request.resource.data.fonction is string
+        && request.resource.data.fonction.size() > 0
+        && request.resource.data.fonction.size() <= 120;
+      allow delete: if isAdmin() && resource.data.demo == true;
+    }
+
+    match /demo_settings/{settingsId} {
+      allow read: if settingsId == 'seed';
+      allow create, update: if isAdmin()
+        && settingsId == 'seed'
+        && request.resource.data.keys().hasOnly(['enabled', 'updatedAt'])
+        && request.resource.data.enabled is bool
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /chats/{chatId} {
+      allow read: if isCommission()
+        || (signedIn()
+          && (resource.data.etudiantId == request.auth.uid
+            || resource.data.referentId == request.auth.uid));
+
+      allow create: if signedIn()
+        && request.resource.data.etudiantId == request.auth.uid
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+          == 'etudiant'
+        && request.resource.data.keys().hasOnly([
+          'etudiantId', 'etudiantPseudo', 'createdAt', 'destinataireType',
+          'referentId', 'referentNom', 'identiteRevelee',
+          'telephoneRevele', 'dernierMessage', 'updatedAt'
+        ])
+        && request.resource.data.destinataireType == 'commission'
+        && request.resource.data.referentId == null
+        && request.resource.data.referentNom == 'Commission sociale'
+        && request.resource.data.identiteRevelee == false
+        && request.resource.data.telephoneRevele == null
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.etudiantPseudo
+          == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.pseudoAnonyme;
+
+      allow update: if signedIn()
+        && ((
+            resource.data.etudiantId == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['identiteRevelee', 'telephoneRevele', 'updatedAt'])
+            && request.resource.data.identiteRevelee == true
+            && request.resource.data.telephoneRevele
+              == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.telephone
+            && request.resource.data.updatedAt == request.time
+          ) || (
+            isChatParticipant(chatId)
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['dernierMessage', 'updatedAt'])
+            && request.resource.data.dernierMessage is string
+            && request.resource.data.dernierMessage.size() <= 4000
+            && request.resource.data.updatedAt == request.time
+          ))
+        && request.resource.data.etudiantId == resource.data.etudiantId
+        && request.resource.data.referentId == resource.data.referentId
+        && (!('destinataireType' in resource.data)
+          || request.resource.data.destinataireType == resource.data.destinataireType)
+        && request.resource.data.identiteRevelee == resource.data.identiteRevelee
+        && request.resource.data.telephoneRevele == resource.data.telephoneRevele;
+
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if isChatParticipant(chatId);
+        allow create: if isChatParticipant(chatId)
+          && request.resource.data.keys().hasOnly([
+            'senderId', 'senderType', 'texte', 'createdAt'
+          ])
+          && request.resource.data.texte is string
+          && request.resource.data.texte.size() > 0
+          && request.resource.data.texte.size() <= 4000
+          && request.resource.data.createdAt == request.time
+          && (
+            (('senderType' in request.resource.data)
+              && request.resource.data.senderType == 'etudiant'
+              && request.resource.data.senderId == request.auth.uid
+              && get(/databases/$(database)/documents/chats/$(chatId))
+                .data.etudiantId == request.auth.uid)
+            || (('senderType' in request.resource.data)
+              && request.resource.data.senderType == 'commission'
+              && isCommission()
+              && !('senderId' in request.resource.data))
+            || (!('senderType' in request.resource.data)
+              && request.resource.data.senderId == request.auth.uid
+              && !('destinataireType' in
+                get(/databases/$(database)/documents/chats/$(chatId)).data))
+          );
+        allow update, delete: if false;
+      }
+    }
+
+    match /annuaire_solidaire/{entryId} {
+      allow read: if isCommission();
+
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid
+        && existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)/mes_inscriptions/$(entryId))
+        && request.resource.data.keys().hasOnly([
+          'type', 'userId', 'nom', 'telephone', 'quartier', 'details', 'disponible'
+        ])
+        && request.resource.data.type in ['hebergement', 'colocation', 'emploi']
+        && request.resource.data.nom is string
+        && request.resource.data.nom.size() > 0
+        && request.resource.data.nom.size() <= 100
+        && request.resource.data.telephone is string
+        && request.resource.data.telephone
+          == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.telephone
+        && request.resource.data.quartier is string
+        && request.resource.data.quartier.size() <= 100
+        && request.resource.data.details is string
+        && request.resource.data.details.size() > 0
+        && request.resource.data.details.size() <= 2000
+        && request.resource.data.disponible is bool;
+
+      allow update: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['disponible'])
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)/mes_inscriptions/$(entryId))
+          .data.disponible == request.resource.data.disponible
+        && request.resource.data.keys().hasOnly([
+          'type', 'userId', 'nom', 'telephone', 'quartier', 'details', 'disponible'
+        ])
+        && request.resource.data.type in ['hebergement', 'colocation', 'emploi']
+        && request.resource.data.nom is string
+        && request.resource.data.nom.size() > 0
+        && request.resource.data.nom.size() <= 100
+        && request.resource.data.telephone is string
+        && request.resource.data.telephone == resource.data.telephone
+        && request.resource.data.quartier is string
+        && request.resource.data.quartier.size() <= 100
+        && request.resource.data.details is string
+        && request.resource.data.details.size() > 0
+        && request.resource.data.details.size() <= 2000
+        && request.resource.data.disponible is bool;
+
+      allow delete: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && !existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)/mes_inscriptions/$(entryId));
+    }
+  }
+}
