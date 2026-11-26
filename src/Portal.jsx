@@ -15,7 +15,7 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
-import { db, firebaseApp } from "./firebase.js";
+import { db } from "./firebase.js";
 
 const roleLabels = {
   etudiant: "Étudiant",
@@ -214,6 +214,61 @@ function imageFileError(file) {
     return "L’image ne doit pas dépasser 5 Mo.";
   }
   return "";
+}
+
+async function requestCloudinaryImage(user, payload) {
+  const idToken = await user.getIdToken();
+  const response = await fetch("/api/cloudinary-image", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(result?.error || "Impossible de gérer cette image.");
+  }
+  return result;
+}
+
+async function uploadCloudinaryImage(user, file, purpose, assetId) {
+  const signedUpload = await requestCloudinaryImage(user, {
+    action: "sign-upload",
+    purpose,
+    assetId,
+  });
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("api_key", signedUpload.apiKey);
+  formData.append("timestamp", signedUpload.timestamp);
+  formData.append("public_id", signedUpload.publicId);
+  formData.append("upload_preset", signedUpload.uploadPreset);
+  formData.append("overwrite", "false");
+  formData.append("signature", signedUpload.signature);
+
+  const response = await fetch(
+    `https://api.cloudinary.com/v1_1/${encodeURIComponent(signedUpload.cloudName)}/image/upload`,
+    { method: "POST", body: formData },
+  );
+  const result = await response.json().catch(() => null);
+  if (!response.ok || typeof result?.secure_url !== "string") {
+    throw new Error(result?.error?.message || "L’envoi de l’image a échoué.");
+  }
+  return result.secure_url;
+}
+
+async function deleteCloudinaryImage(user, purpose, assetId) {
+  await requestCloudinaryImage(user, { action: "delete", purpose, assetId });
+}
+
+function isCloudinaryImageUrl(value) {
+  try {
+    return new URL(value).hostname === "res.cloudinary.com";
+  } catch {
+    return false;
+  }
 }
 
 function formatDate(value) {
@@ -1115,23 +1170,18 @@ export default function Portal({
       return;
     }
     setBusy(true);
-    let uploadedImageRef = null;
-    let storageSdk = null;
+    let uploadedImageId = null;
     try {
       const announcementRef = doc(collection(db, "annonces"));
       let imageUrl = "";
       if (announcementImageFile) {
-        if (!firebaseApp?.options.storageBucket) {
-          throw new Error("Configurez VITE_FIREBASE_STORAGE_BUCKET pour joindre une photo.");
-        }
-        storageSdk = await import("firebase/storage");
-        const storage = storageSdk.getStorage(firebaseApp);
-        const imageRef = storageSdk.ref(storage, `annonces/${user.uid}/${announcementRef.id}`);
-        await storageSdk.uploadBytes(imageRef, announcementImageFile, {
-          contentType: announcementImageFile.type,
-        });
-        uploadedImageRef = imageRef;
-        imageUrl = await storageSdk.getDownloadURL(imageRef);
+        imageUrl = await uploadCloudinaryImage(
+          user,
+          announcementImageFile,
+          "announcement",
+          announcementRef.id,
+        );
+        uploadedImageId = announcementRef.id;
       }
       const batch = writeBatch(db);
       batch.set(announcementRef, {
@@ -1173,9 +1223,9 @@ export default function Portal({
       }
     } catch (error) {
       let message = errorText(error);
-      if (uploadedImageRef && storageSdk) {
+      if (uploadedImageId) {
         try {
-          await storageSdk.deleteObject(uploadedImageRef);
+          await deleteCloudinaryImage(user, "announcement", uploadedImageId);
         } catch (cleanupError) {
           message = `${message} Le nettoyage de l’image temporaire a aussi échoué : ${errorText(cleanupError)}`;
         }
@@ -1309,24 +1359,19 @@ export default function Portal({
       return;
     }
     setBusy(true);
-    let storageSdk = null;
-    let uploadedPhotoRef = null;
+    let uploadedPhotoId = null;
     let photoUrl = commissionForm.photoUrl;
     let photoId = commissionForm.photoId;
     try {
       if (commissionPhotoFile) {
-        if (!firebaseApp?.options.storageBucket) {
-          throw new Error("Configurez VITE_FIREBASE_STORAGE_BUCKET pour envoyer un portrait.");
-        }
-        storageSdk = await import("firebase/storage");
-        const storage = storageSdk.getStorage(firebaseApp);
         photoId = doc(collection(db, "commission_public")).id;
-        const photoRef = storageSdk.ref(storage, `commission/${user.uid}/${photoId}`);
-        await storageSdk.uploadBytes(photoRef, commissionPhotoFile, {
-          contentType: commissionPhotoFile.type,
-        });
-        uploadedPhotoRef = photoRef;
-        photoUrl = await storageSdk.getDownloadURL(photoRef);
+        photoUrl = await uploadCloudinaryImage(
+          user,
+          commissionPhotoFile,
+          "commission",
+          photoId,
+        );
+        uploadedPhotoId = photoId;
       }
       await setDoc(doc(db, "commission_public", user.uid), {
         nom: commissionForm.nom.trim(),
@@ -1338,9 +1383,9 @@ export default function Portal({
       });
     } catch (error) {
       let message = errorText(error);
-      if (uploadedPhotoRef && storageSdk) {
+      if (uploadedPhotoId) {
         try {
-          await storageSdk.deleteObject(uploadedPhotoRef);
+          await deleteCloudinaryImage(user, "commission", uploadedPhotoId);
         } catch (cleanupError) {
           message = `${message} Le nettoyage du nouveau portrait a aussi échoué : ${errorText(cleanupError)}`;
         }
@@ -1350,18 +1395,17 @@ export default function Portal({
       return;
     }
 
-    const previousPhotoId = commissionProfiles.find((item) => item.id === user.uid)?.photoId;
+    const previousProfile = commissionProfiles.find((item) => item.id === user.uid);
+    const previousPhotoId = previousProfile?.photoId;
     setCommissionForm((current) => ({ ...current, photoUrl, photoId }));
     setCommissionPhotoFile(null);
     if (commissionPhotoInput.current) commissionPhotoInput.current.value = "";
 
-    if (previousPhotoId && previousPhotoId !== photoId) {
+    if (previousPhotoId
+      && previousPhotoId !== photoId
+      && isCloudinaryImageUrl(previousProfile?.photoUrl)) {
       try {
-        if (!storageSdk) storageSdk = await import("firebase/storage");
-        const storage = storageSdk.getStorage(firebaseApp);
-        await storageSdk.deleteObject(
-          storageSdk.ref(storage, `commission/${user.uid}/${previousPhotoId}`),
-        );
+        await deleteCloudinaryImage(user, "commission", previousPhotoId);
       } catch (error) {
         setBusy(false);
         showActionMessage(

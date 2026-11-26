@@ -72,7 +72,7 @@ fonction sur Vercel.
 
 1. Installer Node.js (version 20 ou plus) et npm.
 2. Créer un projet Firebase, activer **Authentication → E-mail/Mot de passe**,
-   créer la base **Cloud Firestore** et activer **Cloud Storage**.
+   puis créer la base **Cloud Firestore**.
 3. Copier `.env.example` vers `.env.local`, puis remplir les valeurs de
    configuration de l'application Web Firebase. Pour afficher le lien de
    réinitialisation manuelle du mot de passe, ajoutez aussi
@@ -139,27 +139,33 @@ Les annonces fictives affichent aussi des images d’exemple, avec leurs sources
 
 Les membres peuvent joindre une photo JPG, PNG ou WebP de 5 Mo maximum à leurs
 annonces et les membres habilités peuvent téléverser leur portrait de la même
-façon. Ces photos sont hébergées dans Firebase Storage et visibles publiquement,
-y compris si une annonce est anonyme : ne téléversez aucune image contenant des
-informations personnelles que vous ne souhaitez pas rendre publiques.
-Pour activer l'envoi de photos, activez Cloud Storage dans Firebase et
-renseignez `VITE_FIREBASE_STORAGE_BUCKET`. Sans ce réglage, l'authentification
-et les annonces sans photo restent disponibles. Les règles Storage autorisent
-le portrait uniquement au membre commission/admin concerné; elles consultent
-son rôle Firestore.
+façon. Les nouvelles photos passent par des envois signés vers Cloudinary; aucun
+secret Cloudinary n'est envoyé au navigateur. Les photos sont visibles
+publiquement, y compris si une annonce est anonyme : ne téléversez aucune image
+contenant des informations personnelles que vous ne souhaitez pas rendre
+publiques. Les anciennes URLs Firebase Storage sont conservées et ne sont pas
+migrées ni supprimées.
+
+Pour activer l'envoi de photos, créez un compte Cloudinary et un upload preset
+signé (par exemple `aebb_images`) limité aux formats JPG, PNG et WebP et à
+5 Mo maximum. Ajoutez `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`,
+`CLOUDINARY_API_SECRET` et `CLOUDINARY_UPLOAD_PRESET` aux variables
+d'environnement Vercel. La clé secrète doit rester côté serveur : ne la
+préfixez jamais par `VITE_` et ne la commitez pas. Les photos nécessitent la
+fonction Vercel `/api/cloudinary-image`; elles ne peuvent donc pas être
+téléversées depuis le serveur Vite local. Tant que les variables Cloudinary ne
+sont pas configurées, les annonces sans photo restent disponibles et
+l'application affiche une erreur explicite lors d'un envoi d'image. L'offre
+gratuite Cloudinary est soumise à ses quotas et limites en vigueur.
 
 ## Déployer les règles Firestore
 
-Vérifiez que `firebase.json` pointe vers `firestore.rules` et `storage.rules`,
-puis déployez les deux jeux de règles avec la Firebase CLI :
+Vérifiez que `firebase.json` pointe vers `firestore.rules`, puis déployez les
+règles Firestore avec la Firebase CLI :
 
 ```sh
-firebase deploy --only firestore:rules,storage
+firebase deploy --only firestore:rules
 ```
-
-Les règles Storage consultent le rôle Firestore avant d’autoriser l’envoi d’un
-portrait; acceptez la demande de liaison inter-services si la CLI Firebase la
-présente.
 
 Les règles protègent les profils, l'identité et le contact privé associés aux
 annonces anonymes, les chats et l'annuaire solidaire. Les identifiants des
@@ -174,4 +180,6 @@ de l'application React.
 Importez le dépôt dans Vercel et ajoutez chaque variable `VITE_FIREBASE_*`
 présente dans `.env.example` aux variables d'environnement du projet. Ajoutez
 aussi `VITE_SUPPORT_WHATSAPP` si vous souhaitez activer le lien de réinitialisation.
+Ajoutez également les variables Cloudinary et EmailJS décrites ci-dessus pour
+activer les envois de photos et les notifications.
 Vercel construit l'application avec `npm run build` et publie le dossier `dist`.
