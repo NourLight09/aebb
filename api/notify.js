@@ -149,11 +149,20 @@ export default async function handler(request, response) {
         },
       }),
     });
+    const emailResponseBody = await emailResponse.text();
 
     if (!emailResponse.ok) {
+      const safeEmailResponseBody = [emailPublicKey, emailPrivateKey]
+        .filter(Boolean)
+        .reduce((body, key) => body.split(key).join("[redacted]"), emailResponseBody)
+        .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email redacted]")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 500);
       console.error("EmailJS rejected an AEBB notification", {
         status: emailResponse.status,
         eventType,
+        response: safeEmailResponseBody,
       });
       throw apiError(502, "Le service de courriel n’a pas accepté la notification.");
     }
