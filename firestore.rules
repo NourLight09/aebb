@@ -13,6 +13,17 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(userId)).data.role;
     }
 
+    function hasPublicName(userId, displayedName) {
+      let user = get(/databases/$(database)/documents/users/$(userId)).data;
+      return user.prenom is string
+        && user.prenom.size() > 0
+        && user.prenom.size() <= 80
+        && user.nom is string
+        && user.nom.size() > 0
+        && user.nom.size() <= 80
+        && displayedName == user.prenom + ' ' + user.nom;
+    }
+
     function isAdmin() {
       return signedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
@@ -44,11 +55,17 @@ service cloud.firestore {
     match /users/{userId} {
       allow create: if ownAccount(userId)
         && request.resource.data.keys().hasOnly([
-          'telephone', 'role', 'pseudoAnonyme', 'createdAt'
+          'telephone', 'prenom', 'nom', 'role', 'pseudoAnonyme', 'createdAt'
         ])
         && request.resource.data.role == 'etudiant'
         && request.resource.data.telephone is string
         && request.resource.data.telephone.matches('^0[1-9][0-9]{8}$')
+        && request.resource.data.prenom is string
+        && request.resource.data.prenom.size() > 0
+        && request.resource.data.prenom.size() <= 80
+        && request.resource.data.nom is string
+        && request.resource.data.nom.size() > 0
+        && request.resource.data.nom.size() <= 80
         && request.resource.data.pseudoAnonyme is string
         && request.resource.data.pseudoAnonyme.size() <= 40
         && request.resource.data.createdAt == request.time;
@@ -58,7 +75,15 @@ service cloud.firestore {
       allow update: if (
           ownAccount(userId)
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['pseudoAnonyme'])
+            .hasOnly(['pseudoAnonyme', 'prenom', 'nom'])
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['prenom'])
+            || (request.resource.data.prenom is string
+              && request.resource.data.prenom.size() > 0
+              && request.resource.data.prenom.size() <= 80))
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['nom'])
+            || (request.resource.data.nom is string
+              && request.resource.data.nom.size() > 0
+              && request.resource.data.nom.size() <= 80))
         ) || (
           isAdmin()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role'])
@@ -75,7 +100,12 @@ service cloud.firestore {
           && existsAfter(/databases/$(database)/documents/annonces/$(annonceId))
           && getAfter(/databases/$(database)/documents/annonces/$(annonceId)/prive/contact)
             .data.auteurId == request.auth.uid;
-        allow update, delete: if false;
+        allow update: if false;
+        allow delete: if ownAccount(userId)
+          && exists(/databases/$(database)/documents/annonces/$(annonceId)/prive/contact)
+          && get(/databases/$(database)/documents/annonces/$(annonceId)/prive/contact)
+            .data.auteurId == userId
+          && !existsAfter(/databases/$(database)/documents/annonces/$(annonceId));
       }
 
       match /mes_inscriptions/{entryId} {
@@ -132,8 +162,7 @@ service cloud.firestore {
           || (request.resource.data.estAnonyme == false
             && request.resource.data.contactPublic
               == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.telephone
-            && request.resource.data.auteurAffiche
-              == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.pseudoAnonyme)
+            && hasPublicName(request.auth.uid, request.resource.data.auteurAffiche))
         )
         && request.resource.data.titre is string
         && request.resource.data.titre.size() > 0
@@ -149,16 +178,27 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['statut'])
         && request.resource.data.statut in ['actif', 'resolu']
+        && (request.resource.data.statut == 'actif'
+          || (resource.data.statut == 'actif'
+            && getAfter(/databases/$(database)/documents/annonces/$(annonceId)/prive/contact)
+              .data.suiviPar == request.auth.uid
+            && getAfter(/databases/$(database)/documents/annonces/$(annonceId)/prive/contact)
+              .data.suiviPersonne is string
+            && getAfter(/databases/$(database)/documents/annonces/$(annonceId)/prive/contact)
+              .data.suiviAt == request.time))
         && (isCommission()
           || (ownsAnnouncement(annonceId)
             && resource.data.statut != 'en_attente'));
 
-      allow delete: if false;
+      allow delete: if ownsAnnouncement(annonceId)
+        && !existsAfter(/databases/$(database)/documents/annonces/$(annonceId))
+        && !existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)/mes_annonces/$(annonceId));
 
       match /prive/contact {
-        allow read: if signedIn()
-          && (resource.data.auteurId == request.auth.uid
-            || isCommission());
+        allow read: if isCommission()
+          || (signedIn()
+            && exists(/databases/$(database)/documents/users/$(request.auth.uid)/mes_annonces/$(annonceId)))
+          || (signedIn() && resource.data.auteurId == request.auth.uid);
 
         allow create: if signedIn()
           && existsAfter(/databases/$(database)/documents/annonces/$(annonceId))
@@ -168,8 +208,27 @@ service cloud.firestore {
           && request.resource.data.telephoneReel
             == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.telephone;
 
-        allow update: if false;
-        allow delete: if false;
+        allow update: if signedIn()
+          && (resource.data.auteurId == request.auth.uid || isCommission())
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['suiviResultat', 'suiviPersonne', 'suiviPar', 'suiviAt'])
+          && request.resource.data.auteurId == resource.data.auteurId
+          && request.resource.data.telephoneReel == resource.data.telephoneReel
+          && get(/databases/$(database)/documents/annonces/$(annonceId)).data.statut == 'actif'
+          && getAfter(/databases/$(database)/documents/annonces/$(annonceId)).data.statut == 'resolu'
+          && request.resource.data.suiviResultat in ['don_effectue', 'aide_recue']
+          && ((getAfter(/databases/$(database)/documents/annonces/$(annonceId)).data.type == 'don'
+              && request.resource.data.suiviResultat == 'don_effectue')
+            || (getAfter(/databases/$(database)/documents/annonces/$(annonceId)).data.type == 'demande'
+              && request.resource.data.suiviResultat == 'aide_recue'))
+          && request.resource.data.suiviPersonne is string
+          && request.resource.data.suiviPersonne.size() > 0
+          && request.resource.data.suiviPersonne.size() <= 100
+          && request.resource.data.suiviPar == request.auth.uid
+          && request.resource.data.suiviAt == request.time;
+        allow delete: if resource.data.auteurId == request.auth.uid
+          && !existsAfter(/databases/$(database)/documents/annonces/$(annonceId))
+          && !existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)/mes_annonces/$(annonceId));
       }
     }
 
@@ -189,11 +248,10 @@ service cloud.firestore {
         && request.resource.data.telephoneWhatsApp is string
         && request.resource.data.telephoneWhatsApp.size() >= 8
         && request.resource.data.telephoneWhatsApp.size() <= 20
-        && (!('photoUrl' in request.resource.data)
-          || (request.resource.data.photoUrl is string
-            && request.resource.data.photoUrl.size() <= 2048
-            && (request.resource.data.photoUrl.size() == 0
-              || request.resource.data.photoUrl.matches('^https://.+$'))))
+        && request.resource.data.photoUrl is string
+        && request.resource.data.photoUrl.size() > 0
+        && request.resource.data.photoUrl.size() <= 2048
+        && request.resource.data.photoUrl.matches('^https://.+$')
         && (!('photoId' in request.resource.data)
           || (request.resource.data.photoId is string
             && request.resource.data.photoId.size() <= 128

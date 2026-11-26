@@ -20,14 +20,24 @@ publier, gérer ses annonces ou démarrer une conversation anonyme avec la commi
 Les membres de la commission renseignent leur nom, leur rôle, leur numéro de
 contact et téléversent leur portrait dans **Tableau de bord → Écoute**. Ces
 coordonnées et photos sont affichées publiquement sur `/ecoute`.
+L'inscription demande le prénom et le nom; chaque membre peut ensuite les
+modifier dans **Tableau de bord → Mon espace**. L'administration voit ces
+informations avec le numéro et le pseudo du compte pour attribuer les rôles.
+Les annonces publiques affichent le prénom et le nom; les annonces anonymes
+masquent toujours l'identité et le numéro aux étudiants. Leur vue détaillée
+redirige les autres étudiants vers les contacts publics de la commission.
+Lorsqu'une annonce est clôturée, l'auteur ou la commission indique à qui le don
+a été remis ou de qui l'aide a été reçue. Cette information reste privée, visible
+uniquement par l'auteur et la commission. L'auteur peut aussi supprimer son
+annonce depuis **Mon espace**; cette action retire également son contact privé.
 Les étudiants peuvent démarrer ou reprendre leur discussion anonyme depuis
 **Tableau de bord → Messagerie** ou **Écoute**. Les membres de la commission et
 les admins consultent la boîte commune directement dans **Messagerie**. Les
 admins disposent également d’un accès depuis **Administration**. Chaque nouveau
 message étudiant déclenche un courriel à la commission, mais le contenu du
 message n’est jamais inclus dans le courriel.
-La liste des utilisateurs (numéro, pseudo et rôle) est réservée au rôle `admin`
-et se met à jour en direct.
+La liste des utilisateurs (prénom, nom, numéro, pseudo et rôle) est réservée au
+rôle `admin` et se met à jour en direct.
 Les conversations démarrées sur le site sont adressées à la boîte commune
 « Commission sociale » : l’étudiant ne choisit pas le membre qui répond, et les
 réponses sont affichées sous ce nom générique. Tous les comptes `commission` et

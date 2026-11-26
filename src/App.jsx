@@ -47,6 +47,8 @@ export default function App() {
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState("");
   const [phone, setPhone] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [password, setPassword] = useState("");
   const [formError, setFormError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -190,6 +192,11 @@ export default function App() {
       }
 
       if (mode === "signup") {
+        const prenom = firstName.trim();
+        const nom = lastName.trim();
+        if (!prenom || !nom) {
+          throw new Error("Saisissez votre prénom et votre nom.");
+        }
         const credential = await createUserWithEmailAndPassword(
           auth,
           email,
@@ -197,6 +204,8 @@ export default function App() {
         );
         const newProfile = {
           telephone: email.split("@")[0],
+          prenom,
+          nom,
           role: "etudiant",
           pseudoAnonyme: `Étudiant #${credential.user.uid.slice(-4)}`,
           createdAt: serverTimestamp(),
@@ -212,6 +221,8 @@ export default function App() {
       } else {
         await signInWithEmailAndPassword(auth, email, password);
       }
+      setFirstName("");
+      setLastName("");
       setPassword("");
     } catch (error) {
       setFormError(getErrorMessage(error));
@@ -358,6 +369,28 @@ export default function App() {
         </div>
 
         <form className="auth-form" onSubmit={handleSubmit}>
+          {mode === "signup" && (
+            <>
+              <label htmlFor="first-name">Prénom</label>
+              <input
+                autoComplete="given-name"
+                id="first-name"
+                maxLength={80}
+                onChange={(event) => setFirstName(event.target.value)}
+                required
+                value={firstName}
+              />
+              <label htmlFor="last-name">Nom</label>
+              <input
+                autoComplete="family-name"
+                id="last-name"
+                maxLength={80}
+                onChange={(event) => setLastName(event.target.value)}
+                required
+                value={lastName}
+              />
+            </>
+          )}
           <label htmlFor="phone">Numéro de téléphone</label>
           <input
             autoComplete="tel"

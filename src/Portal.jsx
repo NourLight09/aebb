@@ -285,6 +285,217 @@ function FormError({ children }) {
   return children ? <p className="error-message" role="alert">{children}</p> : null;
 }
 
+function memberFullName(member) {
+  return [member?.prenom, member?.nom]
+    .map((part) => (typeof part === "string" ? part.trim() : ""))
+    .filter(Boolean)
+    .join(" ");
+}
+
+function AnnouncementDetailsDialog({
+  item,
+  onClose,
+  onNavigate,
+  isPrivileged = false,
+  reservedContact = "",
+}) {
+  useEffect(() => {
+    if (!item) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [item, onClose]);
+
+  if (!item) return null;
+
+  const resolved = item.statut === "resolu";
+  const telephone = !item.estAnonyme && !resolved && item.contactPublic
+    ? phoneToTelephone(item.contactPublic)
+    : null;
+  const whatsapp = !item.estAnonyme && !resolved && item.contactPublic
+    ? phoneToWhatsApp(item.contactPublic)
+    : null;
+
+  return (
+    <div
+      className="announcement-dialog-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        aria-labelledby="announcement-dialog-title"
+        aria-modal="true"
+        className="announcement-dialog"
+        role="dialog"
+      >
+        <button
+          aria-label="Fermer les détails"
+          className="announcement-dialog-close"
+          onClick={onClose}
+          type="button"
+        >
+          ×
+        </button>
+        <div className="announcement-topline">
+          <span className={`category-pill ${item.type}`}>
+            {item.type === "don" ? "Don" : "Demande"}
+          </span>
+          <span className={`status-pill ${item.statut}`}>
+            {resolved ? "Résolu" : item.statut === "en_attente" ? "En attente" : "Disponible"}
+          </span>
+        </div>
+        <h2 id="announcement-dialog-title">{item.titre}</h2>
+        {item.imageUrl && (
+          <div className="announcement-image">
+            <img alt={`Photo : ${item.titre}`} src={item.imageUrl} />
+          </div>
+        )}
+        <p className="announcement-description">{item.description}</p>
+        <div className="announcement-dialog-author">
+          <span>Publié par</span>
+          <strong>{item.estAnonyme ? "Membre anonyme AEBB" : item.auteurAffiche || "Membre AEBB"}</strong>
+          <span>{item.demo ? "Annonce fictive" : formatDate(item.createdAt)}</span>
+        </div>
+        {item.estAnonyme ? (
+          item.demo ? (
+            <p className="muted">Cette annonce d’exemple n’a pas de contact réel.</p>
+          ) : isPrivileged && reservedContact ? (
+            <div className="reserved-contact">
+              <strong>Contact réservé à la commission</strong>
+              <a href={`tel:${reservedContact}`}>{reservedContact}</a>
+              {phoneToWhatsApp(reservedContact) && (
+                <a href={phoneToWhatsApp(reservedContact)} rel="noreferrer" target="_blank">
+                  Écrire sur WhatsApp
+                </a>
+              )}
+            </div>
+          ) : isPrivileged ? (
+            <p className="muted">Les coordonnées sont réservées à la commission.</p>
+          ) : (
+            <div className="announcement-dialog-contact">
+              <p>Pour préserver son anonymat, l’auteur ne peut pas être contacté directement.</p>
+              <button
+                className="button button-secondary"
+                onClick={() => {
+                  onClose();
+                  onNavigate("/ecoute");
+                }}
+                type="button"
+              >
+                Contacter un membre de la commission
+              </button>
+            </div>
+          )
+        ) : resolved ? (
+          <p className="muted">Cette annonce est résolue; le contact direct n’est plus proposé.</p>
+        ) : telephone || whatsapp ? (
+          <div className="announcement-dialog-contact">
+            <strong>Contacter {item.auteurAffiche || "l’auteur"}</strong>
+            {item.contactPublic && <span>{item.contactPublic}</span>}
+            <div className="card-actions">
+              {telephone && <a className="button button-small button-secondary" href={telephone}>Appeler</a>}
+              {whatsapp && (
+                <a className="button button-small button-primary" href={whatsapp} rel="noreferrer" target="_blank">
+                  Écrire sur WhatsApp
+                </a>
+              )}
+            </div>
+          </div>
+        ) : (
+          <p className="muted">
+            {item.demo ? "Cette annonce d’exemple n’a pas de contact réel." : "Aucun contact n’a été communiqué."}
+          </p>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function AnnouncementResolutionDialog({
+  item,
+  person,
+  onPersonChange,
+  onClose,
+  onSubmit,
+  busy,
+  error,
+}) {
+  useEffect(() => {
+    if (!item) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [item, onClose]);
+
+  if (!item) return null;
+
+  const isDonation = item.type === "don";
+  return (
+    <div
+      className="announcement-dialog-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        aria-labelledby="announcement-resolution-title"
+        aria-modal="true"
+        className="announcement-dialog"
+        role="dialog"
+      >
+        <button
+          aria-label="Fermer"
+          className="announcement-dialog-close"
+          onClick={onClose}
+          type="button"
+        >
+          ×
+        </button>
+        <p className="eyebrow">Suivi de l’entraide</p>
+        <h2 id="announcement-resolution-title">
+          {isDonation ? "Confirmer le don effectué" : "Confirmer l’aide reçue"}
+        </h2>
+        <p className="muted">
+          {isDonation
+            ? "À qui avez-vous donné ce bien ?"
+            : "Qui vous a donné le bien ou apporté l’aide ?"}
+        </p>
+        <form className="portal-form" onSubmit={onSubmit}>
+          <label>
+            {isDonation ? "Prénom, pseudo ou repère du bénéficiaire" : "Prénom, pseudo ou repère du donateur"}
+            <input
+              autoComplete="off"
+              maxLength={100}
+              onChange={(event) => onPersonChange(event.target.value)}
+              placeholder="Ex. Aïcha ou étudiant rencontré à la résidence"
+              required
+              value={person}
+            />
+          </label>
+          <small className="muted">
+            Ce suivi reste privé : seul l’auteur de l’annonce et la commission pourront le consulter.
+            Pour retirer l’annonce sans échange, annulez et choisissez « Supprimer » dans Mon espace.
+          </small>
+          {error && <FormError>{error}</FormError>}
+          <div className="card-actions">
+            <button className="button button-primary" disabled={busy} type="submit">
+              {busy ? "Enregistrement…" : "Confirmer et clôturer"}
+            </button>
+            <button className="button button-secondary" disabled={busy} onClick={onClose} type="button">
+              Annuler
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function PanelHeading({ eyebrow, title, description, action }) {
   return (
     <div className="panel-heading">
@@ -434,6 +645,7 @@ export function PublicPortal({
   onSignup,
 }) {
   const [announcements, setAnnouncements] = useState([]);
+  const [selectedAnnouncement, setSelectedAnnouncement] = useState(null);
   const [demoAnnouncementRecords, setDemoAnnouncementRecords] = useState([]);
   const [commissionProfiles, setCommissionProfiles] = useState([]);
   const [demoCommissionRecords, setDemoCommissionRecords] = useState([]);
@@ -518,9 +730,16 @@ export function PublicPortal({
         <h3>{item.titre}</h3>
         <p className="announcement-description">{item.description}</p>
         <div className="announcement-meta">
-          <span>{item.estAnonyme ? "Membre anonyme AEBB" : item.auteurAffiche}</span>
+          <span>{item.estAnonyme ? "Membre anonyme AEBB" : item.auteurAffiche || "Membre AEBB"}</span>
           <span>{item.demo ? "Annonce fictive" : formatDate(item.createdAt)}</span>
         </div>
+        <button
+          className="text-button announcement-details-button"
+          onClick={() => setSelectedAnnouncement(item)}
+          type="button"
+        >
+          Voir les détails et le contact
+        </button>
         {whatsapp && (
           <a className="contact-link" href={whatsapp} rel="noreferrer" target="_blank">
             Contacter sur WhatsApp <span aria-hidden="true">↗</span>
@@ -695,6 +914,11 @@ export function PublicPortal({
         </section>
       )}
 
+      <AnnouncementDetailsDialog
+        item={selectedAnnouncement}
+        onClose={() => setSelectedAnnouncement(null)}
+        onNavigate={onNavigate}
+      />
       <footer className="portal-footer">
         <span>AEBB · Besançon</span><span>Consultation libre · Participation avec compte.</span>
       </footer>
@@ -723,6 +947,13 @@ export default function Portal({
   const [myAnnouncementIds, setMyAnnouncementIds] = useState([]);
   const [announcementsLoading, setAnnouncementsLoading] = useState(true);
   const [announcementsError, setAnnouncementsError] = useState("");
+  const [selectedAnnouncement, setSelectedAnnouncement] = useState(null);
+  const [resolutionItem, setResolutionItem] = useState(null);
+  const [resolutionPerson, setResolutionPerson] = useState("");
+  const [memberForm, setMemberForm] = useState({
+    prenom: profile.prenom || "",
+    nom: profile.nom || "",
+  });
   const [privateContacts, setPrivateContacts] = useState({});
   const [privateContactsError, setPrivateContactsError] = useState("");
   const [commissionProfiles, setCommissionProfiles] = useState([]);
@@ -794,8 +1025,17 @@ export default function Portal({
   );
   const selectedChat = chats.find((chat) => chat.id === selectedChatId);
 
+  useEffect(() => {
+    setMemberForm({
+      prenom: profile.prenom || "",
+      nom: profile.nom || "",
+    });
+  }, [profile.prenom, profile.nom]);
+
   function setActiveTab(tabId) {
     showActionMessage("");
+    setSelectedAnnouncement(null);
+    setResolutionItem(null);
     onNavigate(tabId === "accueil" ? "/dashboard" : `/dashboard/${tabId}`);
   }
 
@@ -924,18 +1164,16 @@ export default function Portal({
   }, [user.uid]);
 
   useEffect(() => {
-    if (!isPrivileged || announcements.length === 0) {
+    const contactItems = isPrivileged ? announcements : ownedAnnouncements;
+    if (contactItems.length === 0) {
       setPrivateContacts({});
       setPrivateContactsError("");
       return undefined;
     }
 
     let active = true;
-    const anonymousItems = announcements.filter(
-      (item) => item.estAnonyme && item.statut !== "resolu",
-    );
     Promise.all(
-      anonymousItems.map(async (item) => {
+      contactItems.filter((item) => !item.demo).map(async (item) => {
         const snapshot = await getDoc(
           doc(db, "annonces", item.id, "prive", "contact"),
         );
@@ -955,7 +1193,7 @@ export default function Portal({
     return () => {
       active = false;
     };
-  }, [announcements, isPrivileged]);
+  }, [announcements, isPrivileged, ownedAnnouncements]);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -1096,6 +1334,28 @@ export default function Portal({
     setActionError(error ? message : "");
   }
 
+  async function saveMemberProfile(event) {
+    event.preventDefault();
+    showActionMessage("");
+    const prenom = memberForm.prenom.trim();
+    const nom = memberForm.nom.trim();
+    if (!prenom || !nom || prenom.length > 80 || nom.length > 80) {
+      showActionMessage("Saisissez un prénom et un nom de 80 caractères maximum.", true);
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await updateDoc(doc(db, "users", user.uid), { prenom, nom });
+      setMemberForm({ prenom, nom });
+      showActionMessage("Vos informations ont été enregistrées.");
+    } catch (error) {
+      showActionMessage(errorText(error), true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function selectAnnouncementImage(event) {
     const file = event.currentTarget.files?.[0];
     setAnnouncementImageError("");
@@ -1158,13 +1418,20 @@ export default function Portal({
   function removeCommissionPhoto() {
     setCommissionPhotoFile(null);
     setCommissionPhotoError("");
-    setCommissionForm((current) => ({ ...current, photoUrl: "", photoId: "" }));
     if (commissionPhotoInput.current) commissionPhotoInput.current.value = "";
   }
 
   async function createAnnouncement(event) {
     event.preventDefault();
     showActionMessage("");
+    const publicName = memberFullName(profile);
+    if (!announcementForm.estAnonyme && !publicName) {
+      showActionMessage(
+        "Ajoutez votre prénom et votre nom dans Mon espace, ou choisissez le mode anonyme.",
+        true,
+      );
+      return;
+    }
     if (announcementImageError) {
       showActionMessage(announcementImageError, true);
       return;
@@ -1192,7 +1459,7 @@ export default function Portal({
         statut: "en_attente",
         auteurAffiche: announcementForm.estAnonyme
           ? "Membre anonyme AEBB"
-          : profile.pseudoAnonyme,
+          : publicName,
         contactPublic: announcementForm.estAnonyme ? null : profile.telephone,
         createdAt: serverTimestamp(),
         ...(imageUrl ? { imageUrl } : {}),
@@ -1238,17 +1505,89 @@ export default function Portal({
 
   async function updateAnnouncementStatus(item, status) {
     showActionMessage("");
+    if (status !== "actif") {
+      showActionMessage("Une annonce doit être clôturée avec son suivi.", true);
+      return;
+    }
     try {
       await updateDoc(doc(db, "annonces", item.id), { statut: status });
       showActionMessage(
-        status === "resolu"
-          ? "Annonce clôturée."
-          : item.statut === "en_attente"
-            ? "Annonce validée et publiée."
-            : "Annonce réactivée.",
+        item.statut === "en_attente"
+          ? "Annonce validée et publiée."
+          : "Annonce réactivée.",
       );
     } catch (error) {
       showActionMessage(errorText(error), true);
+    }
+  }
+
+  async function saveAnnouncementResolution(event) {
+    event.preventDefault();
+    showActionMessage("");
+    if (!resolutionItem) return;
+    const person = resolutionPerson.trim();
+    if (!person || person.length > 100) {
+      showActionMessage("Indiquez qui a reçu le don ou apporté l’aide.", true);
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const batch = writeBatch(db);
+      batch.update(doc(db, "annonces", resolutionItem.id), { statut: "resolu" });
+      batch.update(doc(db, "annonces", resolutionItem.id, "prive", "contact"), {
+        suiviResultat: resolutionItem.type === "don" ? "don_effectue" : "aide_recue",
+        suiviPersonne: person,
+        suiviPar: user.uid,
+        suiviAt: serverTimestamp(),
+      });
+      await batch.commit();
+      setResolutionItem(null);
+      setResolutionPerson("");
+      showActionMessage("L’annonce est clôturée et le suivi a été enregistré.");
+    } catch (error) {
+      showActionMessage(errorText(error), true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteAnnouncement(item) {
+    if (item.demo || !myAnnouncementIdSet.has(item.id)) {
+      showActionMessage("Vous ne pouvez supprimer que vos propres annonces.", true);
+      return;
+    }
+    if (!window.confirm(`Supprimer définitivement « ${item.titre} » ?`)) return;
+    showActionMessage("");
+    setBusy(true);
+    try {
+      const batch = writeBatch(db);
+      batch.delete(doc(db, "annonces", item.id));
+      batch.delete(doc(db, "annonces", item.id, "prive", "contact"));
+      batch.delete(doc(db, "users", user.uid, "mes_annonces", item.id));
+      await batch.commit();
+      setPrivateContacts((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+      setSelectedAnnouncement(null);
+      if (isCloudinaryImageUrl(item.imageUrl)) {
+        try {
+          await deleteCloudinaryImage(user, "announcement", item.id);
+        } catch (error) {
+          showActionMessage(
+            `L’annonce a été supprimée, mais sa photo n’a pas pu l’être : ${errorText(error)}`,
+            true,
+          );
+          return;
+        }
+      }
+      showActionMessage("Votre annonce a été supprimée.");
+    } catch (error) {
+      showActionMessage(errorText(error), true);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -1356,6 +1695,10 @@ export default function Portal({
     showActionMessage("");
     if (commissionPhotoError) {
       showActionMessage(commissionPhotoError, true);
+      return;
+    }
+    if (!commissionPhotoFile && !commissionForm.photoUrl) {
+      showActionMessage("Ajoutez un portrait pour publier votre fiche de contact.", true);
       return;
     }
     setBusy(true);
@@ -1557,6 +1900,7 @@ export default function Portal({
     const mayManage = !item.demo
       && (isPrivileged || (own && item.statut !== "en_attente"));
     const reservedContact = privateContacts[item.id]?.telephoneReel;
+    const followup = privateContacts[item.id];
     return (
       <article className="announcement-card" key={`${item.demo ? "demo" : "annonce"}-${item.id}`}>
         <div className="announcement-topline">
@@ -1580,9 +1924,26 @@ export default function Portal({
         <h3>{item.titre}</h3>
         <p className="announcement-description">{item.description}</p>
         <div className="announcement-meta">
-          <span>{item.estAnonyme ? "Membre anonyme AEBB" : item.auteurAffiche}</span>
+          <span>{item.estAnonyme ? "Membre anonyme AEBB" : item.auteurAffiche || "Membre AEBB"}</span>
           <span>{item.demo ? "Annonce fictive" : formatDate(item.createdAt)}</span>
         </div>
+        {followup?.suiviPersonne && (
+          <div className="announcement-followup">
+            <strong>Dernier suivi enregistré</strong>
+            <span>
+              {item.type === "don" ? "Don remis à" : "Aide reçue de"}{" "}
+              {followup.suiviPersonne}
+            </span>
+            {followup.suiviAt && <small>Clôturé le {formatDate(followup.suiviAt)}</small>}
+          </div>
+        )}
+        <button
+          className="text-button announcement-details-button"
+          onClick={() => setSelectedAnnouncement(item)}
+          type="button"
+        >
+          Voir les détails et le contact
+        </button>
         {isPrivileged && item.estAnonyme && reservedContact && (
           <div className="reserved-contact">
             <span>Contact réservé à la commission</span>
@@ -1597,9 +1958,6 @@ export default function Portal({
               </a>
             )}
           </div>
-        )}
-        {isPrivileged && item.estAnonyme && privateContactsError && (
-          <FormError>{privateContactsError}</FormError>
         )}
         {!item.estAnonyme && whatsapp && item.statut !== "resolu" && (
           <a className="contact-link" href={whatsapp} rel="noreferrer" target="_blank">
@@ -1627,12 +1985,28 @@ export default function Portal({
             ) : (
               <button
                 className="button button-small button-secondary"
-                onClick={() => updateAnnouncementStatus(item, "resolu")}
+                onClick={() => {
+                  setResolutionItem(item);
+                  setResolutionPerson("");
+                  showActionMessage("");
+                }}
                 type="button"
               >
-                Marquer résolu
+                Clôturer avec suivi
               </button>
             )}
+          </div>
+        )}
+        {own && (
+          <div className="card-actions">
+            <button
+              className="text-button danger-button"
+              disabled={busy}
+              onClick={() => deleteAnnouncement(item)}
+              type="button"
+            >
+              Supprimer l’annonce
+            </button>
           </div>
         )}
       </article>
@@ -1648,6 +2022,7 @@ export default function Portal({
           description="Un objet, un coup de main ou un besoin ? La communauté est là."
           action={<span className="count-pill">{activeAnnouncements.length} annonce(s)</span>}
         />
+        {privateContactsError && <FormError>{privateContactsError}</FormError>}
         {isPrivileged && (
           <section className="card space-section moderation-queue">
             <div className="space-section-heading">
@@ -1835,14 +2210,14 @@ export default function Portal({
                 />
               </label>
               <label className="image-upload-label">
-                Portrait de la commission (facultatif)
+                Portrait de la commission
                 <input
                   accept="image/jpeg,image/png,image/webp"
                   onChange={selectCommissionPhoto}
                   ref={commissionPhotoInput}
                   type="file"
                 />
-                <small>JPG, PNG ou WebP · 5 Mo maximum. La photo sera publique.</small>
+                <small>Obligatoire pour publier la fiche. JPG, PNG ou WebP · 5 Mo maximum. La photo sera publique.</small>
               </label>
               {commissionPhotoError && <FormError>{commissionPhotoError}</FormError>}
               {(commissionPhotoPreview || commissionForm.photoUrl) && (
@@ -1852,9 +2227,11 @@ export default function Portal({
                     alt="Aperçu du portrait"
                     src={commissionPhotoPreview || commissionForm.photoUrl}
                   />
-                  <button className="text-button" onClick={removeCommissionPhoto} type="button">
-                    Retirer le portrait
-                  </button>
+                  {commissionPhotoPreview && (
+                    <button className="text-button" onClick={removeCommissionPhoto} type="button">
+                      Annuler le nouveau portrait
+                    </button>
+                  )}
                 </div>
               )}
               <label>
@@ -2066,11 +2443,46 @@ export default function Portal({
         <PanelHeading
           eyebrow="Votre suivi"
           title="Mon espace"
-          description="Retrouvez vos annonces et vos propositions solidaires."
+          description="Modifiez vos informations et retrouvez vos annonces et propositions solidaires."
           action={<button className="button button-small button-primary" onClick={() => setActiveTab("messagerie")} type="button">
             Ouvrir la messagerie
           </button>}
         />
+        {privateContactsError && <FormError>{privateContactsError}</FormError>}
+        <section className="card space-section">
+          <div className="space-section-heading">
+            <div>
+              <h3>Mes informations</h3>
+              <span className="muted">Ces informations servent à vous reconnaître et à signer vos annonces publiques.</span>
+            </div>
+          </div>
+          <form className="portal-form profile-form" onSubmit={saveMemberProfile}>
+            <label>
+              Prénom
+              <input
+                autoComplete="given-name"
+                maxLength={80}
+                onChange={(event) => setMemberForm({ ...memberForm, prenom: event.target.value })}
+                required
+                value={memberForm.prenom}
+              />
+            </label>
+            <label>
+              Nom
+              <input
+                autoComplete="family-name"
+                maxLength={80}
+                onChange={(event) => setMemberForm({ ...memberForm, nom: event.target.value })}
+                required
+                value={memberForm.nom}
+              />
+            </label>
+            {actionNotice && <p className="success-message" role="status">{actionNotice}</p>}
+            <button className="button button-primary" disabled={busy} type="submit">
+              {busy ? "Enregistrement…" : "Enregistrer mes informations"}
+            </button>
+          </form>
+        </section>
         <section className="card space-section">
           <div className="space-section-heading">
             <div><h3>Mes annonces</h3><span className="muted">{myAnnouncements.length} au total</span></div>
@@ -2259,8 +2671,10 @@ export default function Portal({
               {members.map((member) => (
                 <div className="member-row" key={member.id}>
                   <div>
-                    <p className="member-phone">{member.telephone || "Compte sans numéro"}</p>
-                    <p className="member-pseudo">{member.pseudoAnonyme || member.id}</p>
+                    <p className="member-phone">{memberFullName(member) || "Nom non renseigné"}</p>
+                    <p className="member-pseudo">
+                      {member.telephone || "Compte sans numéro"} · {member.pseudoAnonyme || member.id}
+                    </p>
                   </div>
                   {member.id === user.uid ? (
                     <span className="role-pill">{roleLabels[member.role] || member.role}</span>
@@ -2371,7 +2785,7 @@ export default function Portal({
       <div className="page-content">
         <section className="welcome welcome-dashboard">
           <p className="eyebrow">Tableau de bord · {roleLabels[profile.role] || profile.role}</p>
-          <h1>Bonjour, {profile.pseudoAnonyme || "membre"}.</h1>
+          <h1>Bonjour, {memberFullName(profile) || profile.pseudoAnonyme || "membre"}.</h1>
           <p>{dashboardDescription}</p>
         </section>
         <div className="quick-stats">
@@ -2446,10 +2860,10 @@ export default function Portal({
         <aside className="portal-sidebar">
           <div className="sidebar-profile">
             <span className="sidebar-avatar" aria-hidden="true">
-              {(profile.pseudoAnonyme || "A").trim().charAt(0).toUpperCase()}
+              {(memberFullName(profile) || profile.pseudoAnonyme || "A").trim().charAt(0).toUpperCase()}
             </span>
             <div>
-              <strong>{profile.pseudoAnonyme || "Membre AEBB"}</strong>
+              <strong>{memberFullName(profile) || profile.pseudoAnonyme || "Membre AEBB"}</strong>
               <span>{roleLabels[profile.role] || profile.role}</span>
             </div>
           </div>
@@ -2484,6 +2898,26 @@ export default function Portal({
           {renderContent()}
         </div>
       </div>
+      <AnnouncementDetailsDialog
+        isPrivileged={isPrivileged}
+        item={selectedAnnouncement}
+        onClose={() => setSelectedAnnouncement(null)}
+        onNavigate={onNavigate}
+        reservedContact={selectedAnnouncement ? privateContacts[selectedAnnouncement.id]?.telephoneReel : ""}
+      />
+      <AnnouncementResolutionDialog
+        busy={busy}
+        error={actionError}
+        item={resolutionItem}
+        onClose={() => {
+          setResolutionItem(null);
+          setResolutionPerson("");
+          showActionMessage("");
+        }}
+        onPersonChange={setResolutionPerson}
+        onSubmit={saveAnnouncementResolution}
+        person={resolutionPerson}
+      />
       <footer className="portal-footer">
         <span>AEBB · Besançon</span><span>Solidarité, écoute et confidentialité.</span>
       </footer>
