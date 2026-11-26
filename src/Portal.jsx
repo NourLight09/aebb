@@ -680,7 +680,10 @@ export default function Portal({
   const [selectedChatId, setSelectedChatId] = useState("");
   const [messages, setMessages] = useState([]);
   const [messagesError, setMessagesError] = useState("");
+  const [messagesLoadError, setMessagesLoadError] = useState("");
   const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messagesLoadedChatId, setMessagesLoadedChatId] = useState("");
+  const [messageSending, setMessageSending] = useState(false);
   const [directoryEntries, setDirectoryEntries] = useState([]);
   const [myDirectoryEntries, setMyDirectoryEntries] = useState([]);
   const [directoryError, setDirectoryError] = useState("");
@@ -962,8 +965,14 @@ export default function Portal({
     if (!selectedChatId) {
       setMessages([]);
       setMessagesError("");
+      setMessagesLoadError("");
+      setMessagesLoadedChatId("");
       return undefined;
     }
+    setMessages([]);
+    setMessagesError("");
+    setMessagesLoadError("");
+    setMessagesLoadedChatId("");
     setMessagesLoading(true);
     const messagesQuery = query(
       collection(db, "chats", selectedChatId, "messages"),
@@ -974,11 +983,11 @@ export default function Portal({
       messagesQuery,
       (snapshot) => {
         setMessages(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
+        setMessagesLoadedChatId(selectedChatId);
         setMessagesLoading(false);
-        setMessagesError("");
       },
       (error) => {
-        setMessagesError(errorText(error));
+        setMessagesLoadError(errorText(error));
         setMessagesLoading(false);
       },
     );
@@ -1195,25 +1204,8 @@ export default function Portal({
 
   async function startChat() {
     showActionMessage("");
-    if (chatsLoading) {
-      showActionMessage("Chargement de vos conversations. Réessayez dans un instant.", true);
-      return;
-    }
-    if (chatsError) {
-      showActionMessage("Impossible de vérifier vos conversations. Corrigez l’erreur affichée avant d’en démarrer une autre.", true);
-      return;
-    }
     if (profile.role !== "etudiant") {
       showActionMessage("Seuls les comptes étudiants peuvent démarrer une conversation anonyme.", true);
-      return;
-    }
-    const existingChat = chats.find(
-      (chat) => chat.etudiantId === user.uid && chat.destinataireType === "commission",
-    );
-    if (existingChat) {
-      setSelectedChatId(existingChat.id);
-      setActiveTab("messagerie");
-      showActionMessage("Votre conversation anonyme avec la commission est ouverte.");
       return;
     }
 
@@ -1248,13 +1240,21 @@ export default function Portal({
   async function sendMessage(event) {
     event.preventDefault();
     if (!selectedChat || !messageDraft.trim()) return;
+    if (messageSending) return;
+    if (messagesLoadError) return;
+    if (messagesLoading || messagesLoadedChatId !== selectedChat.id) {
+      setMessagesError("Attendez le chargement de la conversation avant d’envoyer votre message.");
+      return;
+    }
     const text = messageDraft.trim();
     if (text.length > 4000) {
       setMessagesError("Votre message ne peut pas dépasser 4 000 caractères.");
       return;
     }
+    const shouldNotifyCommission = profile.role === "etudiant" && messages.length === 0;
     setMessagesError("");
     setMessageDraft("");
+    setMessageSending(true);
     try {
       const batch = writeBatch(db);
       const messageRef = doc(collection(db, "chats", selectedChat.id, "messages"));
@@ -1270,7 +1270,7 @@ export default function Portal({
         updatedAt: serverTimestamp(),
       });
       await batch.commit();
-      if (profile.role === "etudiant") {
+      if (shouldNotifyCommission) {
         try {
           await notifyCommission("new-message", selectedChat.id, messageRef.id);
         } catch (notificationError) {
@@ -1282,6 +1282,8 @@ export default function Portal({
     } catch (error) {
       setMessageDraft(text);
       setMessagesError(errorText(error));
+    } finally {
+      setMessageSending(false);
     }
   }
 
@@ -1734,11 +1736,11 @@ export default function Portal({
           action={profile.role === "etudiant" ? (
             <button
               className="button button-small button-primary"
-              disabled={busy || chatsLoading}
+              disabled={busy}
               onClick={startChat}
               type="button"
             >
-              {chatsLoading ? "Chargement…" : "Démarrer / reprendre la discussion"}
+              {busy ? "Création…" : "Démarrer une nouvelle conversation anonyme"}
             </button>
           ) : null}
         />
@@ -1900,8 +1902,8 @@ export default function Portal({
             ? "Les conversations anonymes des étudiants arrivent ici. Toute la commission peut les consulter et y répondre."
             : "Votre conversation privée avec la commission sociale."}
           action={profile.role === "etudiant" ? (
-            <button className="button button-small button-primary" disabled={busy || chatsLoading} onClick={startChat} type="button">
-              {chatsLoading ? "Chargement…" : "Écrire anonymement"}
+            <button className="button button-small button-primary" disabled={busy} onClick={startChat} type="button">
+              {busy ? "Création…" : "Nouvelle conversation anonyme"}
             </button>
           ) : <span className="role-pill">Accès commission</span>}
         />
@@ -1976,7 +1978,7 @@ export default function Portal({
                       );
                     })}
                   </div>
-                  <FormError>{messagesError}</FormError>
+                  <FormError>{messagesLoadError || messagesError}</FormError>
                   <form className="message-form" onSubmit={sendMessage}>
                     <label className="sr-only" htmlFor="chat-message">Votre message</label>
                     <textarea
@@ -1988,7 +1990,17 @@ export default function Portal({
                       rows={2}
                       value={messageDraft}
                     />
-                    <button className="button button-primary" disabled={!messageDraft.trim()} type="submit">Envoyer</button>
+                    <button
+                      className="button button-primary"
+                      disabled={messageSending
+                        || messagesLoading
+                        || messagesLoadedChatId !== selectedChat.id
+                        || Boolean(messagesLoadError)
+                        || !messageDraft.trim()}
+                      type="submit"
+                    >
+                      {messageSending ? "Envoi…" : "Envoyer"}
+                    </button>
                   </form>
                   {isPrivileged && selectedChat.identiteRevelee && (
                     <p className="revealed-notice">Numéro communiqué avec l’accord de l’étudiant : {selectedChat.telephoneRevele}</p>

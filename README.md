@@ -61,9 +61,12 @@ Les variables `VITE_FIREBASE_API_KEY` et `VITE_FIREBASE_PROJECT_ID` doivent
 privée EmailJS par `VITE_` et ne la commitez pas. Les courriels signalent une
 annonce à valider ou un nouveau message étudiant; ils ne contiennent ni le texte
 du chat ni le numéro de l’étudiant. Aucun courriel n’est envoyé lorsqu’un
-étudiant ouvre simplement une conversation sans encore écrire. Les quotas
-dépendent de l’offre EmailJS choisie. Les e-mails ne sont pas envoyés par le
-serveur Vite local : ils nécessitent le déploiement de la fonction sur Vercel.
+étudiant ouvre simplement une conversation sans encore écrire. Chaque nouveau
+fil est distinct; un seul courriel est envoyé à la commission, après le premier
+message étudiant de ce fil. Les messages suivants ne déclenchent pas d’autre
+courriel. Les quotas dépendent de l’offre EmailJS choisie. Les e-mails ne sont
+pas envoyés par le serveur Vite local : ils nécessitent le déploiement de la
+fonction sur Vercel.
 
 ## Démarrer en local
 

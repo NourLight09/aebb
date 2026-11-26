@@ -123,7 +123,7 @@ export default async function handler(request, response) {
       : "AEBB — nouveau message anonyme";
     const dashboardPath = eventType === "new-announcement"
       ? "/dashboard/entraide"
-      : "/dashboard/espace";
+      : "/dashboard/messagerie";
     const portalBaseUrl = process.env.AEBB_PORTAL_URL
       || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
     const portalLink = portalBaseUrl
