@@ -30,14 +30,24 @@ Lorsqu'une annonce est clôturée, l'auteur ou la commission indique à qui le d
 a été remis ou de qui l'aide a été reçue. Cette information reste privée, visible
 uniquement par l'auteur et la commission. L'auteur peut aussi supprimer son
 annonce depuis **Mon espace**; cette action retire également son contact privé.
+Une annonce déjà résolue sans suivi peut être complétée avec **Ajouter le suivi
+manquant**; le suivi déjà enregistré n'est pas modifiable depuis cette action.
 Les étudiants peuvent démarrer ou reprendre leur discussion anonyme depuis
 **Tableau de bord → Messagerie** ou **Écoute**. Les membres de la commission et
 les admins consultent la boîte commune directement dans **Messagerie**. Les
 admins disposent également d’un accès depuis **Administration**. Chaque nouveau
 message étudiant déclenche un courriel à la commission, mais le contenu du
 message n’est jamais inclus dans le courriel.
+La navigation affiche en vert le nombre de conversations contenant un nouveau
+message reçu; le compteur est remis à jour quand la conversation est consultée.
+Sur mobile, la liste des conversations et le fil s'affichent séparément, avec un
+bouton de retour à la liste et une zone de saisie dédiée au bas du fil.
 La liste des utilisateurs (prénom, nom, numéro, pseudo et rôle) est réservée au
-rôle `admin` et se met à jour en direct.
+rôle `admin` et se met à jour en direct. Les comptes sont présentés avec une
+hiérarchie d'identité et un sélecteur de rôle adapté aux petits écrans.
+Dans l'annuaire privé, la commission peut filtrer les fiches par hébergement,
+colocation ou emploi; les libellés de catégories restent explicites dans les
+fiches et dans l'espace personnel de l'étudiant.
 Les conversations démarrées sur le site sont adressées à la boîte commune
 « Commission sociale » : l’étudiant ne choisit pas le membre qui répond, et les
 réponses sont affichées sous ce nom générique. Tous les comptes `commission` et

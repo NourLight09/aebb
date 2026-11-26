@@ -214,8 +214,13 @@ service cloud.firestore {
             .hasOnly(['suiviResultat', 'suiviPersonne', 'suiviPar', 'suiviAt'])
           && request.resource.data.auteurId == resource.data.auteurId
           && request.resource.data.telephoneReel == resource.data.telephoneReel
-          && get(/databases/$(database)/documents/annonces/$(annonceId)).data.statut == 'actif'
-          && getAfter(/databases/$(database)/documents/annonces/$(annonceId)).data.statut == 'resolu'
+          && ((get(/databases/$(database)/documents/annonces/$(annonceId)).data.statut == 'actif'
+              && getAfter(/databases/$(database)/documents/annonces/$(annonceId)).data.statut == 'resolu')
+            || (get(/databases/$(database)/documents/annonces/$(annonceId)).data.statut == 'resolu'
+              && getAfter(/databases/$(database)/documents/annonces/$(annonceId)).data.statut == 'resolu'
+              && !resource.data.keys().hasAny([
+                'suiviResultat', 'suiviPersonne', 'suiviPar', 'suiviAt'
+              ])))
           && request.resource.data.suiviResultat in ['don_effectue', 'aide_recue']
           && ((getAfter(/databases/$(database)/documents/annonces/$(annonceId)).data.type == 'don'
               && request.resource.data.suiviResultat == 'don_effectue')
@@ -323,13 +328,21 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly([
           'etudiantId', 'etudiantPseudo', 'createdAt', 'destinataireType',
           'referentId', 'referentNom', 'identiteRevelee',
-          'telephoneRevele', 'dernierMessage', 'updatedAt'
+          'telephoneRevele', 'dernierMessage', 'dernierMessageAt', 'dernierMessageId',
+          'dernierExpediteur',
+          'etudiantDerniereLectureAt', 'commissionDerniereLectureAt',
+          'updatedAt'
         ])
         && request.resource.data.destinataireType == 'commission'
         && request.resource.data.referentId == null
         && request.resource.data.referentNom == 'Commission sociale'
         && request.resource.data.identiteRevelee == false
         && request.resource.data.telephoneRevele == null
+        && request.resource.data.dernierMessageAt == null
+        && request.resource.data.dernierMessageId == null
+        && request.resource.data.dernierExpediteur == null
+        && request.resource.data.etudiantDerniereLectureAt == request.time
+        && request.resource.data.commissionDerniereLectureAt == null
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
         && request.resource.data.etudiantPseudo
@@ -345,11 +358,38 @@ service cloud.firestore {
               == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.telephone
             && request.resource.data.updatedAt == request.time
           ) || (
+            resource.data.etudiantId == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['etudiantDerniereLectureAt'])
+            && request.resource.data.etudiantDerniereLectureAt == request.time
+          ) || (
+            isCommission()
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['commissionDerniereLectureAt'])
+            && request.resource.data.commissionDerniereLectureAt == request.time
+          ) || (
             isChatParticipant(chatId)
             && request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['dernierMessage', 'updatedAt'])
+              .hasOnly([
+                'dernierMessage', 'dernierMessageAt', 'dernierMessageId',
+                'dernierExpediteur', 'updatedAt'
+              ])
             && request.resource.data.dernierMessage is string
             && request.resource.data.dernierMessage.size() <= 4000
+            && request.resource.data.dernierMessageAt == request.time
+            && request.resource.data.dernierMessageId is string
+            && request.resource.data.dernierExpediteur in ['etudiant', 'commission']
+            && existsAfter(/databases/$(database)/documents/chats/$(chatId)/messages/$(request.resource.data.dernierMessageId))
+            && getAfter(/databases/$(database)/documents/chats/$(chatId)/messages/$(request.resource.data.dernierMessageId))
+              .data.texte == request.resource.data.dernierMessage
+            && getAfter(/databases/$(database)/documents/chats/$(chatId)/messages/$(request.resource.data.dernierMessageId))
+              .data.senderType == request.resource.data.dernierExpediteur
+            && getAfter(/databases/$(database)/documents/chats/$(chatId)/messages/$(request.resource.data.dernierMessageId))
+              .data.createdAt == request.time
+            && ((request.resource.data.dernierExpediteur == 'etudiant'
+                && resource.data.etudiantId == request.auth.uid)
+              || (request.resource.data.dernierExpediteur == 'commission'
+                && isCommission()))
             && request.resource.data.updatedAt == request.time
           ))
         && request.resource.data.etudiantId == resource.data.etudiantId

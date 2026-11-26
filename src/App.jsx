@@ -259,6 +259,7 @@ export default function App() {
       <PublicPortal
         page={currentPath}
         isAuthenticated={Boolean(user)}
+        userId={user?.uid}
         onNavigate={navigate}
         onLogin={() => navigate("/connexion")}
         onSignup={() => navigate("/inscription")}
