@@ -4234,13 +4234,21 @@ input[type="checkbox"] {
   background: transparent;
 }
 
-.chat-list-item.selected,
-.chat-list-item:hover {
-  background: #1c2a20;
+.chat-list-item.selected {
+  background: #121b15;
+  box-shadow: inset 3px 0 var(--benin-yellow);
 }
 
-.chat-list-item.selected {
-  box-shadow: inset 3px 0 var(--benin-red);
+@media (hover: hover) {
+  .chat-list-item:hover:not(.selected) {
+    background: #1c2a20;
+  }
+}
+
+@media (hover: none) {
+  .chat-list-item:hover:not(.selected) {
+    background: transparent;
+  }
 }
 
 .chat-list-item .chat-list-item-heading strong,

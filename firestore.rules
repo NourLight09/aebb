@@ -330,6 +330,7 @@ service cloud.firestore {
           'referentId', 'referentNom', 'identiteRevelee',
           'telephoneRevele', 'dernierMessage', 'dernierMessageAt', 'dernierMessageId',
           'dernierExpediteur',
+          'etudiantMessagesNonLus', 'commissionMessagesNonLus',
           'etudiantDerniereLectureAt', 'commissionDerniereLectureAt',
           'updatedAt'
         ])
@@ -341,6 +342,10 @@ service cloud.firestore {
         && request.resource.data.dernierMessageAt == null
         && request.resource.data.dernierMessageId == null
         && request.resource.data.dernierExpediteur == null
+        && (!('etudiantMessagesNonLus' in request.resource.data)
+          || request.resource.data.etudiantMessagesNonLus == 0)
+        && (!('commissionMessagesNonLus' in request.resource.data)
+          || request.resource.data.commissionMessagesNonLus == 0)
         && request.resource.data.etudiantDerniereLectureAt == request.time
         && request.resource.data.commissionDerniereLectureAt == null
         && request.resource.data.createdAt == request.time
@@ -360,25 +365,50 @@ service cloud.firestore {
           ) || (
             resource.data.etudiantId == request.auth.uid
             && request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['etudiantDerniereLectureAt'])
+              .hasOnly(['etudiantDerniereLectureAt', 'etudiantMessagesNonLus'])
             && request.resource.data.etudiantDerniereLectureAt == request.time
+            && (!request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['etudiantMessagesNonLus'])
+              || request.resource.data.etudiantMessagesNonLus == 0)
           ) || (
             isCommission()
             && request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['commissionDerniereLectureAt'])
+              .hasOnly(['commissionDerniereLectureAt', 'commissionMessagesNonLus'])
             && request.resource.data.commissionDerniereLectureAt == request.time
+            && (!request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['commissionMessagesNonLus'])
+              || request.resource.data.commissionMessagesNonLus == 0)
           ) || (
             isChatParticipant(chatId)
             && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly([
                 'dernierMessage', 'dernierMessageAt', 'dernierMessageId',
-                'dernierExpediteur', 'updatedAt'
+                'dernierExpediteur', 'etudiantMessagesNonLus',
+                'commissionMessagesNonLus', 'updatedAt'
               ])
             && request.resource.data.dernierMessage is string
             && request.resource.data.dernierMessage.size() <= 4000
             && request.resource.data.dernierMessageAt == request.time
             && request.resource.data.dernierMessageId is string
             && request.resource.data.dernierExpediteur in ['etudiant', 'commission']
+            && (!request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['etudiantMessagesNonLus', 'commissionMessagesNonLus'])
+              || (
+                request.resource.data.get('etudiantMessagesNonLus', 0) is int
+                && request.resource.data.get('commissionMessagesNonLus', 0) is int
+                && ((request.resource.data.dernierExpediteur == 'etudiant'
+                    && resource.data.etudiantId == request.auth.uid
+                    && request.resource.data.get('commissionMessagesNonLus', 0)
+                      == resource.data.get('commissionMessagesNonLus', 0) + 1
+                    && request.resource.data.get('etudiantMessagesNonLus', 0)
+                      == resource.data.get('etudiantMessagesNonLus', 0))
+                  || (request.resource.data.dernierExpediteur == 'commission'
+                    && isCommission()
+                    && request.resource.data.get('etudiantMessagesNonLus', 0)
+                      == resource.data.get('etudiantMessagesNonLus', 0) + 1
+                    && request.resource.data.get('commissionMessagesNonLus', 0)
+                      == resource.data.get('commissionMessagesNonLus', 0)))
+              ))
             && existsAfter(/databases/$(database)/documents/chats/$(chatId)/messages/$(request.resource.data.dernierMessageId))
             && getAfter(/databases/$(database)/documents/chats/$(chatId)/messages/$(request.resource.data.dernierMessageId))
               .data.texte == request.resource.data.dernierMessage

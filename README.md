@@ -39,7 +39,9 @@ admins disposent également d’un accès depuis **Administration**. Chaque nouv
 message étudiant déclenche un courriel à la commission, mais le contenu du
 message n’est jamais inclus dans le courriel.
 La navigation affiche en vert le nombre de conversations contenant un nouveau
-message reçu; le compteur est remis à jour quand la conversation est consultée.
+message reçu. Chaque conversation affiche aussi le nombre de messages non lus;
+les anciens fils sont comptés à partir du dernier marqueur de lecture. Le
+compteur est remis à zéro quand la conversation est consultée.
 Sur mobile, la liste des conversations et le fil s'affichent séparément, avec un
 bouton de retour à la liste et une zone de saisie dédiée au bas du fil.
 La liste des utilisateurs (prénom, nom, numéro, pseudo et rôle) est réservée au

@@ -5,6 +5,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  increment,
   limit,
   onSnapshot,
   orderBy,
@@ -35,14 +36,29 @@ function directoryCategoryLabel(type) {
     || "Catégorie inconnue";
 }
 
-function isChatUnread(chat, isPrivileged) {
+function unreadMessageCount(chat, isPrivileged, legacyCount) {
+  const countField = isPrivileged
+    ? "commissionMessagesNonLus"
+    : "etudiantMessagesNonLus";
+  const unreadCount = chat[countField];
+  if (typeof unreadCount === "number" && Number.isFinite(unreadCount) && unreadCount > 0) {
+    return Math.floor(unreadCount);
+  }
+  if (typeof legacyCount === "number" && Number.isFinite(legacyCount)) {
+    return Math.max(0, Math.floor(legacyCount));
+  }
+
   const incomingSender = isPrivileged ? "etudiant" : "commission";
   const readField = isPrivileged
     ? "commissionDerniereLectureAt"
     : "etudiantDerniereLectureAt";
   const updatedAt = chat.dernierMessageAt?.toMillis?.() || 0;
   const readAt = chat[readField]?.toMillis?.() || 0;
-  return chat.dernierExpediteur === incomingSender && updatedAt > readAt;
+  return chat.dernierExpediteur === incomingSender && updatedAt > readAt ? 1 : 0;
+}
+
+function isChatUnread(chat, isPrivileged) {
+  return unreadMessageCount(chat, isPrivileged) > 0;
 }
 
 const tabs = [
@@ -1018,6 +1034,7 @@ export default function Portal({
   const [demoEnabled, setDemoEnabled] = useState(true);
   const [commissionProfilesError, setCommissionProfilesError] = useState("");
   const [chats, setChats] = useState([]);
+  const [legacyUnreadMessageCounts, setLegacyUnreadMessageCounts] = useState({});
   const [chatsError, setChatsError] = useState("");
   const [chatsLoading, setChatsLoading] = useState(true);
   const [selectedChatId, setSelectedChatId] = useState("");
@@ -1328,6 +1345,56 @@ export default function Portal({
   }, [isAdmin, profile.role, user.uid]);
 
   useEffect(() => {
+    if (activeTab !== "messagerie" || !chats.length) return undefined;
+    let active = true;
+    const countField = isPrivileged
+      ? "commissionMessagesNonLus"
+      : "etudiantMessagesNonLus";
+    const readField = isPrivileged
+      ? "commissionDerniereLectureAt"
+      : "etudiantDerniereLectureAt";
+    const incomingSender = isPrivileged ? "etudiant" : "commission";
+    const legacyUnreadChats = chats.filter((chat) =>
+      (!Number.isFinite(chat[countField]) || chat[countField] === 0)
+      && isChatUnread(chat, isPrivileged),
+    );
+    if (!legacyUnreadChats.length) return undefined;
+
+    Promise.all(legacyUnreadChats.map(async (chat) => {
+      const messageCollection = collection(db, "chats", chat.id, "messages");
+      const readAt = chat[readField];
+      const unreadQuery = readAt
+        ? query(messageCollection, where("createdAt", ">", readAt))
+        : messageCollection;
+      const snapshot = await getDocs(unreadQuery);
+      const count = snapshot.docs.filter((message) => {
+        const data = message.data();
+        const senderType = data.senderType
+          || (data.senderId === chat.etudiantId ? "etudiant" : "commission");
+        return senderType === incomingSender;
+      }).length;
+      return {
+        chatId: chat.id,
+        count: Math.max(count, 1),
+      };
+    }))
+      .then((counts) => {
+        if (!active) return;
+        setLegacyUnreadMessageCounts((current) => counts.reduce(
+          (next, item) => ({ ...next, [item.chatId]: item.count }),
+          current,
+        ));
+      })
+      .catch((error) => {
+        if (active) setChatsError(`Impossible de compter les messages non lus : ${errorText(error)}`);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [activeTab, chats, isPrivileged]);
+
+  useEffect(() => {
     if (!selectedChatId) {
       setMessages([]);
       setMessagesError("");
@@ -1380,9 +1447,13 @@ export default function Portal({
     const readField = isPrivileged
       ? "commissionDerniereLectureAt"
       : "etudiantDerniereLectureAt";
+    const unreadCountField = isPrivileged
+      ? "commissionMessagesNonLus"
+      : "etudiantMessagesNonLus";
     readReceiptInFlight.current.add(chatId);
     updateDoc(doc(db, "chats", chatId), {
       [readField]: serverTimestamp(),
+      [unreadCountField]: 0,
     })
       .catch((error) => {
         setMessagesError(`Impossible de marquer cette conversation comme lue : ${errorText(error)}`);
@@ -1738,6 +1809,8 @@ export default function Portal({
         dernierMessageAt: null,
         dernierMessageId: null,
         dernierExpediteur: null,
+        etudiantMessagesNonLus: 0,
+        commissionMessagesNonLus: 0,
         etudiantDerniereLectureAt: serverTimestamp(),
         commissionDerniereLectureAt: null,
         updatedAt: serverTimestamp(),
@@ -1789,6 +1862,9 @@ export default function Portal({
         dernierMessageAt: serverTimestamp(),
         dernierMessageId: messageRef.id,
         dernierExpediteur: messageData.senderType,
+        [messageData.senderType === "etudiant"
+          ? "commissionMessagesNonLus"
+          : "etudiantMessagesNonLus"]: increment(1),
         updatedAt: serverTimestamp(),
       });
       await batch.commit();
@@ -2496,29 +2572,46 @@ export default function Portal({
           ) : (
             <div className={`chat-layout ${mobileChatOpen ? "mobile-chat-open" : ""}`}>
               <div aria-label="Liste des conversations" className="chat-list" role="region">
-                {chats.map((chat) => (
-                  <button
-                    className={`chat-list-item ${selectedChatId === chat.id ? "selected" : ""}`}
-                    key={chat.id}
-                    onClick={() => {
-                      setSelectedChatId(chat.id);
-                      setMobileChatOpen(true);
-                    }}
-                    type="button"
-                  >
-                    <span className="chat-avatar" aria-hidden="true">
-                      {isPrivileged ? chatAvatarLabel(chat.etudiantPseudo) : "A"}
-                    </span>
-                    <span className="chat-list-item-content">
-                      <span className="chat-list-item-heading">
-                        <strong>{isPrivileged ? chat.etudiantPseudo : "Commission sociale"}</strong>
-                        {isChatUnread(chat, isPrivileged) && <span className="chat-unread-badge">Nouveau</span>}
+                {chats.map((chat) => {
+                  const unreadCount = unreadMessageCount(
+                    chat,
+                    isPrivileged,
+                    legacyUnreadMessageCounts[chat.id],
+                  );
+                  const selected = selectedChatId === chat.id;
+                  return (
+                    <button
+                      aria-current={selected ? "true" : undefined}
+                      className={`chat-list-item ${selected ? "selected" : ""}`}
+                      key={chat.id}
+                      onClick={() => {
+                        setSelectedChatId(chat.id);
+                        setMobileChatOpen(true);
+                      }}
+                      type="button"
+                    >
+                      <span className="chat-avatar" aria-hidden="true">
+                        {isPrivileged ? chatAvatarLabel(chat.etudiantPseudo) : "A"}
                       </span>
-                      <span className="chat-list-preview">{chat.dernierMessage || "Conversation démarrée"}</span>
-                      <small>{formatDate(chat.updatedAt)}</small>
-                    </span>
-                  </button>
-                ))}
+                      <span className="chat-list-item-content">
+                        <span className="chat-list-item-heading">
+                          <strong>{isPrivileged ? chat.etudiantPseudo : "Commission sociale"}</strong>
+                          {unreadCount > 0 && (
+                            <span
+                              aria-label={`${unreadCount} message(s) non lu(s)`}
+                              className="chat-unread-badge"
+                              role="status"
+                            >
+                              {unreadCount}
+                            </span>
+                          )}
+                        </span>
+                        <span className="chat-list-preview">{chat.dernierMessage || "Conversation démarrée"}</span>
+                        <small>{formatDate(chat.updatedAt)}</small>
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
               {selectedChat ? (
                 <div className="chat-window">
