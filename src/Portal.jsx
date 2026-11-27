@@ -1727,10 +1727,12 @@ export default function Portal({
   async function createAnnouncement(event) {
     event.preventDefault();
     showActionMessage("");
-    const publicName = memberFullName(profile);
-    if (!announcementForm.estAnonyme && !publicName) {
+    const authorFirstName = typeof profile.prenom === "string" ? profile.prenom.trim() : "";
+    const authorLastName = typeof profile.nom === "string" ? profile.nom.trim() : "";
+    const publicName = [authorFirstName, authorLastName].filter(Boolean).join(" ");
+    if (!authorFirstName || !authorLastName) {
       showActionMessage(
-        "Ajoutez votre prénom et votre nom dans Mon espace, ou choisissez le mode anonyme.",
+        "Ajoutez votre prénom et votre nom dans Mon espace avant de publier, y compris en mode anonyme. Ces informations resteront visibles uniquement par la commission.",
         true,
       );
       return;
@@ -1782,8 +1784,8 @@ export default function Portal({
       if (editingAnnouncement) {
         batch.update(announcementRef, announcementData);
         batch.update(doc(db, "annonces", announcementRef.id, "prive", "contact"), {
-          auteurPrenom: profile.prenom,
-          auteurNom: profile.nom,
+          auteurPrenom: authorFirstName,
+          auteurNom: authorLastName,
           telephoneReel: profile.telephone,
         });
       } else {
@@ -1794,8 +1796,8 @@ export default function Portal({
         });
         batch.set(doc(db, "annonces", announcementRef.id, "prive", "contact"), {
           auteurId: user.uid,
-          auteurPrenom: profile.prenom,
-          auteurNom: profile.nom,
+          auteurPrenom: authorFirstName,
+          auteurNom: authorLastName,
           telephoneReel: profile.telephone,
         });
         batch.set(doc(db, "users", user.uid, "mes_annonces", announcementRef.id), {
