@@ -3238,8 +3238,10 @@ export default function Portal({
       <div className="page-content">
         <PanelHeading
           eyebrow={isPrivileged ? "Confidentiel · commission" : "Votre proposition"}
-          title={isPrivileged ? "Annuaire solidaire" : "Proposer mon aide"}
-          description={isPrivileged
+          title={isAdmin ? "Proposer mon aide et annuaire privé" : isPrivileged ? "Annuaire solidaire" : "Proposer mon aide"}
+          description={isAdmin
+            ? "Comme tout étudiant, vous pouvez proposer votre aide; vous gardez aussi l’accès aux fiches confidentielles de la commission."
+            : isPrivileged
             ? "Les coordonnées et détails des volontaires sont réservés aux membres habilités."
             : "Transmettez vos disponibilités à la commission. Votre fiche et vos coordonnées ne seront pas visibles par les autres étudiants."}
           action={isPrivileged ? <span className="role-pill">Accès commission</span> : null}
@@ -3611,7 +3613,7 @@ export default function Portal({
       ? [
           { label: "Gérer les rôles et catégories", tab: "admin" },
           { label: "Publier ou valider une annonce", tab: "entraide" },
-          { label: "Proposer une aide / ouvrir l’annuaire", tab: "annuaire" },
+          { label: "Proposer mon aide", tab: "annuaire" },
           { label: "Mon espace étudiant", tab: "espace" },
           { label: "Créer ou modifier ma fiche commission", tab: "ecoute" },
           { label: "Messagerie anonyme", tab: "messagerie" },
@@ -3741,7 +3743,7 @@ export default function Portal({
                 }}
               >
                 <span aria-hidden="true">{tab.icon}</span>
-                <span>{tab.id === "annuaire" && !isPrivileged ? "Proposer mon aide" : tab.label}</span>
+                <span>{tab.id === "annuaire" && (!isPrivileged || isAdmin) ? "Proposer mon aide" : tab.label}</span>
                 {tab.id === "messagerie" && unreadChatCount > 0 && (
                   <span
                     aria-label={`${unreadChatCount} conversation(s) non lue(s)`}
