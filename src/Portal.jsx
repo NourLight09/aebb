@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   collection,
+  deleteField,
   deleteDoc,
   doc,
   getDoc,
@@ -36,29 +37,34 @@ function directoryCategoryLabel(type) {
     || "Catégorie inconnue";
 }
 
-function unreadMessageCount(chat, isPrivileged, legacyCount) {
-  const countField = isPrivileged
-    ? "commissionMessagesNonLus"
-    : "etudiantMessagesNonLus";
+function isStudentSideChat(chat, userId, isPrivileged) {
+  return !isPrivileged || chat.etudiantId === userId;
+}
+
+function unreadMessageCount(chat, isPrivileged, legacyCount, userId) {
+  const studentSide = isStudentSideChat(chat, userId, isPrivileged);
+  const countField = studentSide
+    ? "etudiantMessagesNonLus"
+    : "commissionMessagesNonLus";
   const unreadCount = chat[countField];
-  if (typeof unreadCount === "number" && Number.isFinite(unreadCount) && unreadCount > 0) {
-    return Math.floor(unreadCount);
+  if (typeof unreadCount === "number" && Number.isFinite(unreadCount)) {
+    return Math.max(0, Math.floor(unreadCount));
   }
   if (typeof legacyCount === "number" && Number.isFinite(legacyCount)) {
     return Math.max(0, Math.floor(legacyCount));
   }
 
-  const incomingSender = isPrivileged ? "etudiant" : "commission";
-  const readField = isPrivileged
-    ? "commissionDerniereLectureAt"
-    : "etudiantDerniereLectureAt";
+  const incomingSender = studentSide ? "commission" : "etudiant";
+  const readField = studentSide
+    ? "etudiantDerniereLectureAt"
+    : "commissionDerniereLectureAt";
   const updatedAt = chat.dernierMessageAt?.toMillis?.() || 0;
   const readAt = chat[readField]?.toMillis?.() || 0;
   return chat.dernierExpediteur === incomingSender && updatedAt > readAt ? 1 : 0;
 }
 
-function isChatUnread(chat, isPrivileged) {
-  return unreadMessageCount(chat, isPrivileged) > 0;
+function isChatUnread(chat, isPrivileged, userId) {
+  return unreadMessageCount(chat, isPrivileged, undefined, userId) > 0;
 }
 
 const tabs = [
@@ -68,6 +74,7 @@ const tabs = [
   { id: "messagerie", label: "Messagerie", icon: "✉" },
   { id: "espace", label: "Mon espace", icon: "▣" },
   { id: "annuaire", label: "Annuaire privé", icon: "⌕" },
+  { id: "membres", label: "Membres", icon: "♙", private: true },
   { id: "ressources", label: "Infos utiles", icon: "＋" },
   { id: "admin", label: "Administration", icon: "⚙", admin: true },
 ];
@@ -285,8 +292,13 @@ async function uploadCloudinaryImage(user, file, purpose, assetId) {
   return result.secure_url;
 }
 
-async function deleteCloudinaryImage(user, purpose, assetId) {
-  await requestCloudinaryImage(user, { action: "delete", purpose, assetId });
+async function deleteCloudinaryImage(user, purpose, assetId, ownership) {
+  await requestCloudinaryImage(user, {
+    action: "delete",
+    purpose,
+    assetId,
+    ...ownership,
+  });
 }
 
 function isCloudinaryImageUrl(value) {
@@ -349,6 +361,7 @@ function AnnouncementDetailsDialog({
   isPrivileged = false,
   isOwn = false,
   reservedContact = "",
+  reservedName = "",
 }) {
   useEffect(() => {
     if (!item) return undefined;
@@ -418,6 +431,7 @@ function AnnouncementDetailsDialog({
           ) : isPrivileged && reservedContact ? (
             <div className="reserved-contact">
               <strong>Contact réservé à la commission</strong>
+              {reservedName && <span>{reservedName}</span>}
               <a href={`tel:${reservedContact}`}>{reservedContact}</a>
               {phoneToWhatsApp(reservedContact) && (
                 <a href={phoneToWhatsApp(reservedContact)} rel="noreferrer" target="_blank">
@@ -538,7 +552,7 @@ function AnnouncementResolutionDialog({
             />
           </label>
           <small className="muted">
-            Ce suivi reste privé : seul l’auteur de l’annonce et la commission pourront le consulter.
+              Seuls les membres de la commission peuvent consulter le nom renseigné dans ce suivi.
             {!isBackfill && " Pour retirer l’annonce sans échange, annulez et choisissez « Supprimer » dans Mon espace."}
           </small>
           {error && <FormError>{error}</FormError>}
@@ -696,6 +710,8 @@ export function PublicPortal({
   page,
   isAuthenticated,
   userId,
+  canInstallApp,
+  onInstallApp,
   onNavigate,
   onLogin,
   onSignup,
@@ -834,6 +850,17 @@ export function PublicPortal({
           Portail solidaire
         </a>
         <div className="public-actions">
+          {canInstallApp && (
+            <button
+              aria-label="Installer l’application AEBB"
+              className="button button-small button-secondary pwa-install-button"
+              onClick={onInstallApp}
+              type="button"
+            >
+              <span aria-hidden="true">↓</span>
+              <span className="pwa-install-label">Installer</span>
+            </button>
+          )}
           {isAuthenticated ? (
             <button className="button button-small button-primary" onClick={joinAction} type="button">
               Mon tableau de bord
@@ -1008,6 +1035,9 @@ export default function Portal({
   membersError,
   membersLoading,
   onRoleChange,
+  canInstallApp,
+  onInstallApp,
+  signupNotice,
 }) {
   const routeTab = route === "/dashboard"
     ? "accueil"
@@ -1039,6 +1069,9 @@ export default function Portal({
   const [chatsLoading, setChatsLoading] = useState(true);
   const [selectedChatId, setSelectedChatId] = useState("");
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
+  const [isMobileChatLayout, setIsMobileChatLayout] = useState(
+    () => window.matchMedia("(max-width: 760px)").matches,
+  );
   const [messages, setMessages] = useState([]);
   const [messagesError, setMessagesError] = useState("");
   const [messagesLoadError, setMessagesLoadError] = useState("");
@@ -1062,6 +1095,10 @@ export default function Portal({
   const [commissionPhotoPreview, setCommissionPhotoPreview] = useState("");
   const [commissionPhotoError, setCommissionPhotoError] = useState("");
   const commissionPhotoInput = useRef(null);
+  const [editingAnnouncement, setEditingAnnouncement] = useState(null);
+  const [removeExistingAnnouncementImage, setRemoveExistingAnnouncementImage] = useState(false);
+  const [deletingMemberId, setDeletingMemberId] = useState("");
+  const [memberDeleteError, setMemberDeleteError] = useState("");
   const [announcementForm, setAnnouncementForm] = useState({
     titre: "",
     type: "don",
@@ -1103,7 +1140,9 @@ export default function Portal({
   );
   const selectedChat = chats.find((chat) => chat.id === selectedChatId);
 
-  const unreadChatCount = chats.filter((chat) => isChatUnread(chat, isPrivileged)).length;
+  const unreadChatCount = chats.filter((chat) =>
+    isChatUnread(chat, isPrivileged, user.uid),
+  ).length;
 
   useEffect(() => {
     setMemberForm({
@@ -1115,6 +1154,14 @@ export default function Portal({
   useEffect(() => {
     if (activeTab !== "messagerie") setMobileChatOpen(false);
   }, [activeTab]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 760px)");
+    const updateLayout = () => setIsMobileChatLayout(mediaQuery.matches);
+    updateLayout();
+    mediaQuery.addEventListener("change", updateLayout);
+    return () => mediaQuery.removeEventListener("change", updateLayout);
+  }, []);
 
   function setActiveTab(tabId) {
     showActionMessage("");
@@ -1248,7 +1295,14 @@ export default function Portal({
   }, [user.uid]);
 
   useEffect(() => {
-    const contactItems = isPrivileged ? announcements : ownedAnnouncements;
+    if (!isPrivileged) {
+      setPrivateContacts({});
+      setPrivateContactsError("");
+      setPrivateContactsLoading(false);
+      return undefined;
+    }
+
+    const contactItems = announcements;
     if (contactItems.length === 0) {
       setPrivateContacts({});
       setPrivateContactsError("");
@@ -1263,7 +1317,18 @@ export default function Portal({
         const snapshot = await getDoc(
           doc(db, "annonces", item.id, "prive", "contact"),
         );
-        return [item.id, snapshot.exists() ? snapshot.data() : null];
+        const followup = await getDoc(
+          doc(db, "annonces", item.id, "prive", "suivi"),
+        );
+        return [
+          item.id,
+          snapshot.exists()
+            ? {
+                ...snapshot.data(),
+                ...(followup.exists() ? followup.data() : {}),
+              }
+            : null,
+        ];
       }),
     )
       .then((entries) => {
@@ -1283,7 +1348,7 @@ export default function Portal({
     return () => {
       active = false;
     };
-  }, [announcements, isPrivileged, ownedAnnouncements]);
+  }, [announcements, isPrivileged]);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -1333,7 +1398,7 @@ export default function Portal({
         setSelectedChatId((current) =>
           current && nextChats.some((chat) => chat.id === current)
             ? current
-            : nextChats[0]?.id || "",
+            : isMobileChatLayout ? "" : nextChats[0]?.id || "",
         );
       },
       (error) => {
@@ -1342,25 +1407,27 @@ export default function Portal({
       },
     );
     return unsubscribe;
-  }, [isAdmin, profile.role, user.uid]);
+  }, [isAdmin, isMobileChatLayout, profile.role, user.uid]);
 
   useEffect(() => {
     if (activeTab !== "messagerie" || !chats.length) return undefined;
     let active = true;
-    const countField = isPrivileged
-      ? "commissionMessagesNonLus"
-      : "etudiantMessagesNonLus";
-    const readField = isPrivileged
-      ? "commissionDerniereLectureAt"
-      : "etudiantDerniereLectureAt";
-    const incomingSender = isPrivileged ? "etudiant" : "commission";
-    const legacyUnreadChats = chats.filter((chat) =>
-      (!Number.isFinite(chat[countField]) || chat[countField] === 0)
-      && isChatUnread(chat, isPrivileged),
-    );
+    const legacyUnreadChats = chats.filter((chat) => {
+      const studentSide = isStudentSideChat(chat, user.uid, isPrivileged);
+      const countField = studentSide
+        ? "etudiantMessagesNonLus"
+        : "commissionMessagesNonLus";
+      return (!Number.isFinite(chat[countField]) || chat[countField] === 0)
+        && isChatUnread(chat, isPrivileged, user.uid);
+    });
     if (!legacyUnreadChats.length) return undefined;
 
     Promise.all(legacyUnreadChats.map(async (chat) => {
+      const studentSide = isStudentSideChat(chat, user.uid, isPrivileged);
+      const readField = studentSide
+        ? "etudiantDerniereLectureAt"
+        : "commissionDerniereLectureAt";
+      const incomingSender = studentSide ? "commission" : "etudiant";
       const messageCollection = collection(db, "chats", chat.id, "messages");
       const readAt = chat[readField];
       const unreadQuery = readAt
@@ -1392,10 +1459,10 @@ export default function Portal({
     return () => {
       active = false;
     };
-  }, [activeTab, chats, isPrivileged]);
+  }, [activeTab, chats, isPrivileged, user.uid]);
 
   useEffect(() => {
-    if (!selectedChatId) {
+    if (!selectedChatId || (isMobileChatLayout && !mobileChatOpen)) {
       setMessages([]);
       setMessagesError("");
       setMessagesLoadError("");
@@ -1425,7 +1492,7 @@ export default function Portal({
       },
     );
     return unsubscribe;
-  }, [selectedChatId]);
+  }, [isMobileChatLayout, mobileChatOpen, selectedChatId]);
 
   useEffect(() => {
     const messageList = messageListRef.current;
@@ -1436,20 +1503,22 @@ export default function Portal({
     if (
       activeTab !== "messagerie"
       || !selectedChat
+      || (isMobileChatLayout && !mobileChatOpen)
       || messagesLoading
       || messagesLoadedChatId !== selectedChat.id
       || messagesLoadError
-      || !isChatUnread(selectedChat, isPrivileged)
+      || !isChatUnread(selectedChat, isPrivileged, user.uid)
       || readReceiptInFlight.current.has(selectedChat.id)
     ) return undefined;
 
     const chatId = selectedChat.id;
-    const readField = isPrivileged
-      ? "commissionDerniereLectureAt"
-      : "etudiantDerniereLectureAt";
-    const unreadCountField = isPrivileged
-      ? "commissionMessagesNonLus"
-      : "etudiantMessagesNonLus";
+    const studentSide = isStudentSideChat(selectedChat, user.uid, isPrivileged);
+    const readField = studentSide
+      ? "etudiantDerniereLectureAt"
+      : "commissionDerniereLectureAt";
+    const unreadCountField = studentSide
+      ? "etudiantMessagesNonLus"
+      : "commissionMessagesNonLus";
     readReceiptInFlight.current.add(chatId);
     updateDoc(doc(db, "chats", chatId), {
       [readField]: serverTimestamp(),
@@ -1463,10 +1532,13 @@ export default function Portal({
   }, [
     activeTab,
     isPrivileged,
+    isMobileChatLayout,
+    mobileChatOpen,
     messagesLoadError,
     messagesLoadedChatId,
     messagesLoading,
     selectedChat,
+    user.uid,
   ]);
 
   useEffect(() => {
@@ -1600,6 +1672,33 @@ export default function Portal({
     if (announcementImageInput.current) announcementImageInput.current.value = "";
   }
 
+  function beginAnnouncementEdit(item) {
+    setEditingAnnouncement(item);
+    setAnnouncementForm({
+      titre: item.titre || "",
+      type: item.type || "don",
+      description: item.description || "",
+      estAnonyme: Boolean(item.estAnonyme),
+    });
+    setAnnouncementImageFile(null);
+    setRemoveExistingAnnouncementImage(false);
+    setAnnouncementImageError("");
+    showActionMessage("");
+    setActiveTab("entraide");
+  }
+
+  function cancelAnnouncementEdit() {
+    setEditingAnnouncement(null);
+    setAnnouncementForm({
+      titre: "",
+      type: "don",
+      description: "",
+      estAnonyme: false,
+    });
+    setRemoveExistingAnnouncementImage(false);
+    removeAnnouncementImage();
+  }
+
   function removeCommissionPhoto() {
     setCommissionPhotoFile(null);
     setCommissionPhotoError("");
@@ -1623,20 +1722,25 @@ export default function Portal({
     }
     setBusy(true);
     let uploadedImageId = null;
+    let imageCleanupError = "";
     try {
-      const announcementRef = doc(collection(db, "annonces"));
-      let imageUrl = "";
+      const announcementRef = editingAnnouncement
+        ? doc(db, "annonces", editingAnnouncement.id)
+        : doc(collection(db, "annonces"));
+      let imageUrl = editingAnnouncement?.imageUrl || "";
+      let imageId = editingAnnouncement?.imageId || editingAnnouncement?.id || "";
       if (announcementImageFile) {
+        imageId = doc(collection(db, "annonces")).id;
         imageUrl = await uploadCloudinaryImage(
           user,
           announcementImageFile,
           "announcement",
-          announcementRef.id,
+          imageId,
         );
-        uploadedImageId = announcementRef.id;
+        uploadedImageId = imageId;
       }
       const batch = writeBatch(db);
-      batch.set(announcementRef, {
+      const announcementData = {
         titre: announcementForm.titre.trim(),
         description: announcementForm.description.trim(),
         type: announcementForm.type,
@@ -1646,32 +1750,84 @@ export default function Portal({
           ? "Membre anonyme AEBB"
           : publicName,
         contactPublic: announcementForm.estAnonyme ? null : profile.telephone,
-        createdAt: serverTimestamp(),
-        ...(imageUrl ? { imageUrl } : {}),
-      });
-      batch.set(doc(db, "annonces", announcementRef.id, "prive", "contact"), {
-        auteurId: user.uid,
-        telephoneReel: profile.telephone,
-      });
-      batch.set(doc(db, "users", user.uid, "mes_annonces", announcementRef.id), {
-        createdAt: serverTimestamp(),
-      });
+        updatedAt: serverTimestamp(),
+      };
+      if (announcementImageFile) {
+        announcementData.imageUrl = imageUrl;
+        announcementData.imageId = imageId;
+      } else if (removeExistingAnnouncementImage) {
+        announcementData.imageUrl = deleteField();
+        announcementData.imageId = deleteField();
+      }
+
+      if (editingAnnouncement) {
+        batch.update(announcementRef, announcementData);
+        batch.update(doc(db, "annonces", announcementRef.id, "prive", "contact"), {
+          auteurPrenom: profile.prenom,
+          auteurNom: profile.nom,
+          telephoneReel: profile.telephone,
+        });
+      } else {
+        batch.set(announcementRef, {
+          ...announcementData,
+          createdAt: serverTimestamp(),
+          ...(imageUrl ? { imageUrl, imageId } : {}),
+        });
+        batch.set(doc(db, "annonces", announcementRef.id, "prive", "contact"), {
+          auteurId: user.uid,
+          auteurPrenom: profile.prenom,
+          auteurNom: profile.nom,
+          telephoneReel: profile.telephone,
+        });
+        batch.set(doc(db, "users", user.uid, "mes_annonces", announcementRef.id), {
+          createdAt: serverTimestamp(),
+        });
+      }
       await batch.commit();
+      uploadedImageId = null;
+      if (editingAnnouncement && (announcementImageFile || removeExistingAnnouncementImage)
+        && editingAnnouncement.imageUrl
+        && isCloudinaryImageUrl(editingAnnouncement.imageUrl)) {
+        try {
+          await deleteCloudinaryImage(
+            user,
+            "announcement",
+            editingAnnouncement.imageId || editingAnnouncement.id,
+          );
+        } catch (cleanupError) {
+          imageCleanupError = errorText(cleanupError);
+        }
+      }
       setAnnouncementForm({
         titre: "",
         type: "don",
         description: "",
         estAnonyme: false,
       });
+      setEditingAnnouncement(null);
+      setRemoveExistingAnnouncementImage(false);
       removeAnnouncementImage();
-      try {
-        await notifyCommission("new-announcement", announcementRef.id);
-        showActionMessage("Annonce envoyée. Elle sera visible après validation.");
-      } catch (notificationError) {
-        showActionMessage(
-          `Votre annonce est enregistrée et en attente de validation, mais le courriel n’a pas été envoyé : ${errorText(notificationError)}`,
-          true,
-        );
+      if (!editingAnnouncement) {
+        try {
+          await notifyCommission("new-announcement", announcementRef.id);
+          showActionMessage("Annonce envoyée. Elle sera visible après validation.");
+        } catch (notificationError) {
+          showActionMessage(
+            `Votre annonce est enregistrée et en attente de validation, mais le courriel n’a pas été envoyé : ${errorText(notificationError)}`,
+            true,
+          );
+        }
+      } else {
+        let notificationError = "";
+        try {
+          await notifyCommission("new-announcement", announcementRef.id);
+        } catch (error) {
+          notificationError = ` L’alerte à la commission n’a pas été envoyée : ${errorText(error)}`;
+        }
+        const warning = [imageCleanupError, notificationError].filter(Boolean).join(".");
+        showActionMessage(warning
+          ? `Annonce modifiée et renvoyée en validation. ${warning}`
+          : "Annonce modifiée et renvoyée en validation.", Boolean(warning));
       }
     } catch (error) {
       let message = errorText(error);
@@ -1716,10 +1872,16 @@ export default function Portal({
       return;
     }
     const contact = privateContacts[resolutionItem.id];
-    const isBackfill = resolutionItem.statut === "resolu" && !contact?.suiviPersonne;
-    if (resolutionItem.statut === "resolu" && !isBackfill) {
-      showActionMessage("Le suivi de cette annonce est déjà enregistré.", true);
-      return;
+    const isBackfill = resolutionItem.statut === "resolu";
+    if (isBackfill) {
+      if (!isPrivileged) {
+        showActionMessage("Seule la commission peut compléter le suivi d’une annonce déjà clôturée.", true);
+        return;
+      }
+      if (contact?.suiviPersonne) {
+        showActionMessage("Le suivi de cette annonce est déjà enregistré.", true);
+        return;
+      }
     }
 
     setBusy(true);
@@ -1728,7 +1890,7 @@ export default function Portal({
       if (!isBackfill) {
         batch.update(doc(db, "annonces", resolutionItem.id), { statut: "resolu" });
       }
-      batch.update(doc(db, "annonces", resolutionItem.id, "prive", "contact"), {
+      batch.set(doc(db, "annonces", resolutionItem.id, "prive", "suivi"), {
         suiviResultat: resolutionItem.type === "don" ? "don_effectue" : "aide_recue",
         suiviPersonne: person,
         suiviPar: user.uid,
@@ -1739,7 +1901,7 @@ export default function Portal({
       setResolutionPerson("");
       showActionMessage(isBackfill
         ? "Le suivi manquant a été ajouté."
-        : "L’annonce est clôturée et le suivi a été enregistré.");
+        : "L’annonce est clôturée. Le nom renseigné est réservé à la commission.");
     } catch (error) {
       showActionMessage(errorText(error), true);
     } finally {
@@ -1747,19 +1909,41 @@ export default function Portal({
     }
   }
 
-  async function deleteAnnouncement(item) {
-    if (item.demo || !myAnnouncementIdSet.has(item.id)) {
-      showActionMessage("Vous ne pouvez supprimer que vos propres annonces.", true);
+  async function deleteAnnouncement(item, allowModeration = false) {
+    const ownAnnouncement = myAnnouncementIdSet.has(item.id);
+    if (item.demo || (!ownAnnouncement && !(isPrivileged && allowModeration))) {
+      showActionMessage("Vous ne pouvez supprimer que vos annonces ou une annonce à modérer.", true);
       return;
     }
-    if (!window.confirm(`Supprimer définitivement « ${item.titre} » ?`)) return;
+    const actionLabel = item.statut === "en_attente" && isPrivileged && allowModeration
+      ? "Refuser et supprimer"
+      : "Supprimer";
+    if (!window.confirm(`${actionLabel} définitivement « ${item.titre} » ?`)) return;
+    const authorId = ownAnnouncement
+      ? user.uid
+      : privateContacts[item.id]?.auteurId;
+    if (!authorId) {
+      showActionMessage("Impossible d’identifier l’auteur de cette annonce. Rechargez la page et réessayez.", true);
+      return;
+    }
     showActionMessage("");
     setBusy(true);
+    let moderationPhotoDeleted = false;
     try {
+      if (!ownAnnouncement && isCloudinaryImageUrl(item.imageUrl)) {
+        await deleteCloudinaryImage(
+          user,
+          "announcement",
+          item.imageId || item.id,
+          { ownerId: authorId, announcementId: item.id },
+        );
+        moderationPhotoDeleted = true;
+      }
       const batch = writeBatch(db);
       batch.delete(doc(db, "annonces", item.id));
       batch.delete(doc(db, "annonces", item.id, "prive", "contact"));
-      batch.delete(doc(db, "users", user.uid, "mes_annonces", item.id));
+      batch.delete(doc(db, "annonces", item.id, "prive", "suivi"));
+      batch.delete(doc(db, "users", authorId, "mes_annonces", item.id));
       await batch.commit();
       setPrivateContacts((current) => {
         const next = { ...current };
@@ -1767,9 +1951,13 @@ export default function Portal({
         return next;
       });
       setSelectedAnnouncement(null);
-      if (isCloudinaryImageUrl(item.imageUrl)) {
+      if (isCloudinaryImageUrl(item.imageUrl) && !moderationPhotoDeleted) {
         try {
-          await deleteCloudinaryImage(user, "announcement", item.id);
+          await deleteCloudinaryImage(
+            user,
+            "announcement",
+            item.imageId || item.id,
+          );
         } catch (error) {
           showActionMessage(
             `L’annonce a été supprimée, mais sa photo n’a pas pu l’être : ${errorText(error)}`,
@@ -1780,7 +1968,12 @@ export default function Portal({
       }
       showActionMessage("Votre annonce a été supprimée.");
     } catch (error) {
-      showActionMessage(errorText(error), true);
+      showActionMessage(
+        moderationPhotoDeleted
+          ? `La photo a été supprimée, mais l’annonce n’a pas pu être retirée : ${errorText(error)}`
+          : errorText(error),
+        true,
+      );
     } finally {
       setBusy(false);
     }
@@ -1788,11 +1981,6 @@ export default function Portal({
 
   async function startChat() {
     showActionMessage("");
-    if (profile.role !== "etudiant") {
-      showActionMessage("Seuls les comptes étudiants peuvent démarrer une conversation anonyme.", true);
-      return;
-    }
-
     setBusy(true);
     try {
       const chatRef = doc(collection(db, "chats"));
@@ -1832,6 +2020,7 @@ export default function Portal({
   async function sendMessage(event) {
     event.preventDefault();
     if (!selectedChat || !messageDraft.trim()) return;
+    const studentSide = isStudentSideChat(selectedChat, user.uid, isPrivileged);
     if (messageSending) return;
     if (messagesLoadError) return;
     if (messagesLoading || messagesLoadedChatId !== selectedChat.id) {
@@ -1843,7 +2032,7 @@ export default function Portal({
       setMessagesError("Votre message ne peut pas dépasser 4 000 caractères.");
       return;
     }
-    const shouldNotifyCommission = profile.role === "etudiant" && messages.length === 0;
+    const shouldNotifyCommission = studentSide && messages.length === 0;
     setMessagesError("");
     setMessageDraft("");
     setMessageSending(true);
@@ -1851,18 +2040,18 @@ export default function Portal({
       const batch = writeBatch(db);
       const messageRef = doc(collection(db, "chats", selectedChat.id, "messages"));
       const messageData = {
-        senderType: profile.role === "etudiant" ? "etudiant" : "commission",
+        senderType: studentSide ? "etudiant" : "commission",
         texte: text,
         createdAt: serverTimestamp(),
       };
-      if (profile.role === "etudiant") messageData.senderId = user.uid;
+      if (studentSide) messageData.senderId = user.uid;
       batch.set(messageRef, messageData);
       batch.update(doc(db, "chats", selectedChat.id), {
         dernierMessage: text,
         dernierMessageAt: serverTimestamp(),
         dernierMessageId: messageRef.id,
         dernierExpediteur: messageData.senderType,
-        [messageData.senderType === "etudiant"
+        [studentSide
           ? "commissionMessagesNonLus"
           : "etudiantMessagesNonLus"]: increment(1),
         updatedAt: serverTimestamp(),
@@ -1969,6 +2158,36 @@ export default function Portal({
     }
     setBusy(false);
     showActionMessage("Votre fiche de contact est publiée.");
+  }
+
+  async function deleteOwnCommissionProfile() {
+    const ownProfile = commissionProfiles.find((item) => item.id === user.uid);
+    if (!ownProfile || !window.confirm("Retirer votre fiche publique de la commission ?")) return;
+    showActionMessage("");
+    setBusy(true);
+    try {
+      await deleteDoc(doc(db, "commission_public", user.uid));
+      setCommissionForm({
+        nom: "",
+        fonction: "",
+        telephoneWhatsApp: "",
+        photoUrl: "",
+        photoId: "",
+      });
+      setCommissionPhotoFile(null);
+      if (commissionPhotoInput.current) commissionPhotoInput.current.value = "";
+      if (ownProfile.photoId && isCloudinaryImageUrl(ownProfile.photoUrl)) {
+        await deleteCloudinaryImage(user, "commission", ownProfile.photoId);
+      }
+      showActionMessage("Votre fiche publique a été retirée.");
+    } catch (error) {
+      showActionMessage(
+        `La fiche n’a pas pu être complètement retirée : ${errorText(error)}`,
+        true,
+      );
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function seedDemoData() {
@@ -2107,10 +2326,12 @@ export default function Portal({
     const whatsapp = item.estAnonyme
       ? null
       : phoneToWhatsApp(item.contactPublic);
-    const mayManage = !item.demo
-      && (isPrivileged || (isOwn && item.statut !== "en_attente"));
     const reservedContact = privateContacts[item.id]?.telephoneReel;
     const followup = privateContacts[item.id];
+    const reservedName = [
+      privateContacts[item.id]?.auteurPrenom,
+      privateContacts[item.id]?.auteurNom,
+    ].filter(Boolean).join(" ");
     return (
       <article className="announcement-card" key={`${item.demo ? "demo" : "annonce"}-${item.id}`}>
         <div className="announcement-topline">
@@ -2137,7 +2358,7 @@ export default function Portal({
           <span>{isOwn ? "Votre annonce" : item.estAnonyme ? "Membre anonyme AEBB" : item.auteurAffiche || "Membre AEBB"}</span>
           <span>{item.demo ? "Annonce fictive" : formatDate(item.createdAt)}</span>
         </div>
-        {followup?.suiviPersonne && (
+        {isPrivileged && followup?.suiviPersonne && (
           <div className="announcement-followup">
             <strong>Dernier suivi enregistré</strong>
             <span>
@@ -2152,11 +2373,12 @@ export default function Portal({
           onClick={() => setSelectedAnnouncement(item)}
           type="button"
         >
-          {own ? "Voir les détails" : "Voir les détails et le contact"}
+          {isOwn ? "Voir les détails" : "Voir les détails et le contact"}
         </button>
         {isPrivileged && item.estAnonyme && reservedContact && (
           <div className="reserved-contact">
             <span>Contact réservé à la commission</span>
+            {reservedName && <strong>{reservedName}</strong>}
             <a href={`tel:${reservedContact}`}>{reservedContact}</a>
             {phoneToWhatsApp(reservedContact) && (
               <a
@@ -2174,19 +2396,29 @@ export default function Portal({
             Contacter sur WhatsApp <span aria-hidden="true">↗</span>
           </a>
         )}
-        {mayManage && (
+        {!item.demo && isPrivileged && (
           <div className="card-actions">
             {item.statut === "en_attente" ? (
-              <button
-                className="button button-small button-primary"
-                onClick={() => updateAnnouncementStatus(item, "actif")}
-                type="button"
-              >
-                Valider et publier
-              </button>
+              <>
+                <button
+                  className="button button-small button-primary"
+                  onClick={() => updateAnnouncementStatus(item, "actif")}
+                  type="button"
+                >
+                  Valider et publier
+                </button>
+                <button
+                  className="button button-small button-secondary danger-button"
+                  disabled={busy}
+                  onClick={() => deleteAnnouncement(item, true)}
+                  type="button"
+                >
+                  Refuser et supprimer
+                </button>
+              </>
             ) : item.statut === "resolu" ? (
               <>
-                {!followup?.suiviPersonne && !privateContactsLoading && !privateContactsError && (
+                {isPrivileged && !followup?.suiviPersonne && !privateContactsLoading && !privateContactsError && (
                   <button
                     className="button button-small button-primary"
                     onClick={() => {
@@ -2222,12 +2454,32 @@ export default function Portal({
             )}
           </div>
         )}
-        {own && (
+        {isOwn && (
           <div className="card-actions">
+            <button
+              className="button button-small button-secondary"
+              disabled={busy}
+              onClick={() => beginAnnouncementEdit(item)}
+              type="button"
+            >
+              Modifier
+            </button>
             <button
               className="text-button danger-button"
               disabled={busy}
               onClick={() => deleteAnnouncement(item)}
+              type="button"
+            >
+              Supprimer l’annonce
+            </button>
+          </div>
+        )}
+        {!item.demo && isPrivileged && !isOwn && item.statut !== "en_attente" && (
+          <div className="card-actions">
+            <button
+              className="text-button danger-button"
+              disabled={busy}
+              onClick={() => deleteAnnouncement(item, true)}
               type="button"
             >
               Supprimer l’annonce
@@ -2265,8 +2517,69 @@ export default function Portal({
             )}
           </section>
         )}
+        {isPrivileged && (
+          <section className="card space-section">
+            <div className="space-section-heading">
+              <div>
+                <h3>Suivi des dons</h3>
+                <span className="muted">
+                  {announcements.filter((item) => item.type === "don").length} don(s) ·{" "}
+                  {announcements.filter((item) =>
+                    item.type === "don" && item.statut === "en_attente",
+                  ).length} à valider
+                </span>
+              </div>
+            </div>
+            {announcements.some((item) => item.type === "don") ? (
+              <div className="member-list">
+                {announcements
+                  .filter((item) => item.type === "don")
+                  .map((item) => {
+                    const contact = privateContacts[item.id] || {};
+                    const authorName = [
+                      contact.auteurPrenom,
+                      contact.auteurNom,
+                    ].filter(Boolean).join(" ") || item.auteurAffiche;
+                    return (
+                      <div className="member-row" key={`don-${item.id}`}>
+                        <div className="member-identity">
+                          <span className="member-identity-copy">
+                            <strong className="member-name">{item.titre}</strong>
+                            <span className="member-contact">
+                              Donateur : {authorName || "Identité indisponible"}
+                            </span>
+                            <small className="member-pseudo">
+                              {contact.suiviPersonne
+                                ? `Bénéficiaire : ${contact.suiviPersonne}`
+                                : item.statut === "resolu"
+                                  ? "Don clôturé · suivi à compléter"
+                                  : "Bénéficiaire à confirmer"}
+                            </small>
+                          </span>
+                        </div>
+                        <span className={`status-pill ${item.statut}`}>
+                          {item.statut === "en_attente"
+                            ? "À valider"
+                            : item.statut === "resolu"
+                              ? "Résolu"
+                              : "Disponible"}
+                        </span>
+                      </div>
+                    );
+                  })}
+              </div>
+            ) : (
+              <p className="muted">Les dons publiés apparaîtront ici pour leur suivi.</p>
+            )}
+          </section>
+        )}
         <section className="card form-card">
-          <h3>Partager avec la communauté</h3>
+          <h3>{editingAnnouncement ? "Modifier mon annonce" : "Partager avec la communauté"}</h3>
+          {editingAnnouncement && (
+            <p className="muted">
+              Toute modification renvoie l’annonce en attente de validation par la commission.
+            </p>
+          )}
           <form className="portal-form" onSubmit={createAnnouncement}>
             <label>
               Titre
@@ -2289,7 +2602,7 @@ export default function Portal({
               </select>
             </label>
             <p className="muted">
-              Toutes les annonces, dons comme demandes, seront visibles après validation par un membre habilité.
+              Les dons et demandes sont publiés après validation. En mode anonyme, seul le nom et les coordonnées réservés à la commission permettent d’organiser le contact.
             </p>
             <label>
               Description
@@ -2319,6 +2632,20 @@ export default function Portal({
                 <button className="text-button" onClick={removeAnnouncementImage} type="button">Retirer la photo</button>
               </div>
             )}
+            {editingAnnouncement?.imageUrl && !announcementImagePreview && (
+              <div className="announcement-image-preview">
+                {!removeExistingAnnouncementImage && (
+                  <img alt="Photo actuelle de l’annonce" src={editingAnnouncement.imageUrl} />
+                )}
+                <button
+                  className="text-button"
+                  onClick={() => setRemoveExistingAnnouncementImage((current) => !current)}
+                  type="button"
+                >
+                  {removeExistingAnnouncementImage ? "Conserver la photo actuelle" : "Retirer la photo actuelle"}
+                </button>
+              </div>
+            )}
             <label className="checkbox-row">
               <input
                 checked={announcementForm.estAnonyme}
@@ -2327,14 +2654,30 @@ export default function Portal({
               />
               <span>
                 <strong>Publier en mode anonyme</strong>
-                <small>Votre numéro restera visible uniquement par la commission.</small>
+                <small>Votre nom et votre numéro seront visibles uniquement par la commission.</small>
               </span>
             </label>
             <FormError>{actionError}</FormError>
             {actionNotice && <p className="success-message" role="status">{actionNotice}</p>}
-            <button className="button button-primary" disabled={busy} type="submit">
-              {busy ? "Envoi…" : "Envoyer pour validation"}
-            </button>
+            <div className="card-actions">
+              {editingAnnouncement && (
+                <button
+                  className="button button-secondary"
+                  disabled={busy}
+                  onClick={cancelAnnouncementEdit}
+                  type="button"
+                >
+                  Annuler la modification
+                </button>
+              )}
+              <button className="button button-primary" disabled={busy} type="submit">
+                {busy
+                  ? "Enregistrement…"
+                  : editingAnnouncement
+                    ? "Enregistrer et renvoyer en validation"
+                    : "Envoyer pour validation"}
+              </button>
+            </div>
           </form>
         </section>
 
@@ -2377,19 +2720,19 @@ export default function Portal({
           eyebrow="Un espace pour parler"
           title="Coin écoute"
           description="Les coordonnées des membres servent aux contacts directs. Les messages envoyés ici arrivent à la commission entière, sans destinataire nominatif."
-          action={profile.role === "etudiant" ? (
+          action={(
             <button
               className="button button-small button-primary"
               disabled={busy}
               onClick={startChat}
               type="button"
             >
-              {busy ? "Création…" : "Démarrer une nouvelle conversation anonyme"}
+              {busy ? "Création…" : "M’écrire anonymement à la commission"}
             </button>
-          ) : null}
+          )}
         />
         {commissionProfilesError && <FormError>{commissionProfilesError}</FormError>}
-        {profile.role === "etudiant" && (
+        {!isPrivileged && (
           <div className="notice-card">
             <strong>Une boîte anonyme, partagée avec la commission.</strong>
             <p>
@@ -2476,6 +2819,16 @@ export default function Portal({
                 {busy ? "Enregistrement…" : "Enregistrer ma fiche"}
               </button>
             </form>
+            {ownPublicProfile && (
+              <button
+                className="text-button danger-button"
+                disabled={busy}
+                onClick={deleteOwnCommissionProfile}
+                type="button"
+              >
+                Retirer ma fiche publique
+              </button>
+            )}
           </section>
         ) : null}
         {allCommissionProfiles.length ? (
@@ -2503,7 +2856,7 @@ export default function Portal({
                         {member.telephoneWhatsApp}
                       </a>
                     )}
-                    {whatsapp && !isOwn && (
+                    {whatsapp && !member.demo && member.id !== user.uid && (
                       <a className="button button-small button-secondary" href={whatsapp} rel="noreferrer" target="_blank">
                         Écrire sur WhatsApp
                       </a>
@@ -2539,6 +2892,9 @@ export default function Portal({
   }
 
   function renderMessages() {
+    const selectedStudentSide = selectedChat
+      ? isStudentSideChat(selectedChat, user.uid, isPrivileged)
+      : false;
     return (
       <div className="page-content">
         <PanelHeading
@@ -2547,16 +2903,16 @@ export default function Portal({
           description={isPrivileged
             ? "Les conversations anonymes des étudiants arrivent ici. Toute la commission peut les consulter et y répondre."
             : "Votre conversation privée avec la commission sociale."}
-          action={profile.role === "etudiant" ? (
+          action={(
             <button className="button button-small button-primary" disabled={busy} onClick={startChat} type="button">
               {busy ? "Création…" : "Nouvelle conversation anonyme"}
             </button>
-          ) : <span className="role-pill">Accès commission</span>}
+          )}
         />
         <section className="card space-section">
           <div className="space-section-heading">
             <div>
-              <h3>{isPrivileged ? "Conversations étudiantes" : "Ma conversation"}</h3>
+              <h3>{isPrivileged ? "Boîte de réception et ma conversation" : "Ma conversation"}</h3>
               <span className="muted">{chats.length} conversation(s)</span>
             </div>
           </div>
@@ -2577,8 +2933,11 @@ export default function Portal({
                     chat,
                     isPrivileged,
                     legacyUnreadMessageCounts[chat.id],
+                    user.uid,
                   );
-                  const selected = selectedChatId === chat.id;
+                  const ownStudentChat = chat.etudiantId === user.uid;
+                  const selected = selectedChatId === chat.id
+                    && (!isMobileChatLayout || mobileChatOpen);
                   return (
                     <button
                       aria-current={selected ? "true" : undefined}
@@ -2591,11 +2950,15 @@ export default function Portal({
                       type="button"
                     >
                       <span className="chat-avatar" aria-hidden="true">
-                        {isPrivileged ? chatAvatarLabel(chat.etudiantPseudo) : "A"}
+                        {isPrivileged && !ownStudentChat ? chatAvatarLabel(chat.etudiantPseudo) : "A"}
                       </span>
                       <span className="chat-list-item-content">
                         <span className="chat-list-item-heading">
-                          <strong>{isPrivileged ? chat.etudiantPseudo : "Commission sociale"}</strong>
+                          <strong>
+                            {isPrivileged && !ownStudentChat
+                              ? chat.etudiantPseudo
+                              : "Ma conversation anonyme"}
+                          </strong>
                           {unreadCount > 0 && (
                             <span
                               aria-label={`${unreadCount} message(s) non lu(s)`}
@@ -2625,24 +2988,30 @@ export default function Portal({
                       ‹ <span>Conversations</span>
                     </button>
                     <span className="chat-avatar chat-window-avatar" aria-hidden="true">
-                      {isPrivileged ? chatAvatarLabel(selectedChat.etudiantPseudo) : "A"}
+                      {isPrivileged && !selectedStudentSide ? chatAvatarLabel(selectedChat.etudiantPseudo) : "A"}
                     </span>
                     <div>
-                      <strong>{isPrivileged ? selectedChat.etudiantPseudo : "Commission sociale"}</strong>
-                      <small>{selectedChat.identiteRevelee ? `Identité révélée · ${selectedChat.telephoneRevele}` : "Conversation anonyme"}</small>
+                      <strong>{selectedStudentSide ? "Commission sociale" : selectedChat.etudiantPseudo}</strong>
+                      <small>
+                        {selectedStudentSide
+                          ? "Votre conversation anonyme"
+                          : selectedChat.identiteRevelee
+                            ? `Identité révélée · ${selectedChat.telephoneRevele}`
+                            : "Conversation anonyme"}
+                      </small>
                     </div>
-                    {profile.role === "etudiant" && !selectedChat.identiteRevelee && (
+                    {selectedStudentSide && !selectedChat.identiteRevelee && (
                       <button className="text-button" onClick={revealIdentity} type="button">Révéler mon numéro</button>
                     )}
                   </div>
-                  {isPrivileged && selectedChat.identiteRevelee && (
+                  {isPrivileged && !selectedStudentSide && selectedChat.identiteRevelee && (
                     <p className="revealed-notice">Numéro communiqué avec l’accord de l’étudiant : {selectedChat.telephoneRevele}</p>
                   )}
                   <div aria-live="polite" className="message-list" ref={messageListRef}>
                     {messagesLoading && <p className="muted">Chargement des messages…</p>}
                     {!messagesLoading && messages.length === 0 && (
                       <p className="muted">
-                        {isPrivileged
+                        {!selectedStudentSide
                           ? "Répondez à l’étudiant sous le nom « Commission sociale »."
                           : "Écrivez à la commission. Un membre habilité vous répondra ici."}
                       </p>
@@ -2650,19 +3019,20 @@ export default function Portal({
                     {messages.map((message) => {
                       const senderType = message.senderType
                         || (message.senderId === selectedChat.etudiantId ? "etudiant" : "commission");
-                      const isOwnStudentMessage = profile.role === "etudiant"
+                      const isOwnStudentMessage = selectedStudentSide
+                        && senderType === "etudiant"
                         && message.senderId === user.uid;
                       const senderLabel = isOwnStudentMessage
                         ? "Vous"
                         : senderType === "etudiant"
                           ? selectedChat.etudiantPseudo
                           : "Commission sociale";
-                      const isOwnMessage = profile.role === "etudiant"
+                      const isOwnMessage = selectedStudentSide
                         ? isOwnStudentMessage
                         : senderType === "commission";
                       return (
                         <div className={`message-bubble ${isOwnMessage ? "mine" : ""}`} key={message.id}>
-                          {isPrivileged && <span>{isOwnMessage ? "Vous · Commission" : senderLabel}</span>}
+                          {isPrivileged && !selectedStudentSide && <span>{isOwnMessage ? "Vous · Commission" : senderLabel}</span>}
                           <p>{message.texte}</p>
                           <small>{formatMessageTime(message.createdAt)}</small>
                         </div>
@@ -2932,6 +3302,77 @@ export default function Portal({
     );
   }
 
+  async function deleteMemberAccount(member) {
+    if (member.id === user.uid) {
+      setMemberDeleteError("Vous ne pouvez pas supprimer votre propre compte ici.");
+      return;
+    }
+    const displayName = memberFullName(member) || member.telephone || "ce membre";
+    if (!window.confirm(
+      `Supprimer définitivement le compte de ${displayName} ?\n\nSes annonces, fiches, conversations et photos associées seront également supprimées.`,
+    )) return;
+
+    setMemberDeleteError("");
+    setDeletingMemberId(member.id);
+    try {
+      const response = await fetch("/api/admin-delete-user", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${await user.getIdToken()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ userId: member.id }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || result?.deleted !== true) {
+        throw new Error(result?.error || "Le compte n’a pas pu être supprimé.");
+      }
+    } catch (error) {
+      setMemberDeleteError(errorText(error));
+    } finally {
+      setDeletingMemberId("");
+    }
+  }
+
+  function renderMembers() {
+    return (
+      <div className="page-content">
+        <PanelHeading
+          eyebrow="Annuaire interne"
+          title="Membres du portail"
+          description="Liste réservée à la commission et à l’administration. Les membres gardent leurs propres annonces et conversations anonymes."
+          action={<span className="count-pill">{members.length} membre(s)</span>}
+        />
+        {(membersError || memberDeleteError) && (
+          <FormError>{memberDeleteError || membersError}</FormError>
+        )}
+        {membersLoading ? (
+          <p className="muted">Chargement des membres…</p>
+        ) : members.length ? (
+          <section className="card admin-card">
+            <div className="member-list">
+              {members.map((member) => (
+                <div className="member-row" key={member.id}>
+                  <div className="member-identity">
+                    <span aria-hidden="true" className="member-avatar">{memberInitials(member)}</span>
+                    <div className="member-identity-copy">
+                      <strong className="member-name">{memberFullName(member) || "Nom à compléter"}</strong>
+                      <span className="member-contact">{member.telephone || "Compte sans numéro"}</span>
+                      <small className="member-pseudo">{member.pseudoAnonyme || "Identifiant anonyme non renseigné"}</small>
+                    </div>
+                  </div>
+                  <span className="role-pill">{roleLabels[member.role] || member.role}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : (
+          <EmptyState title="Aucun membre trouvé" text="Les comptes apparaîtront ici après inscription." />
+        )}
+      </div>
+    );
+  }
+
   function renderAdmin() {
     return (
       <div className="page-content">
@@ -2965,6 +3406,7 @@ export default function Portal({
             </div>
           </div>
           {membersError && <FormError>{membersError}</FormError>}
+          {memberDeleteError && <FormError>{memberDeleteError}</FormError>}
           {membersLoading ? <p className="muted">Chargement des comptes…</p> : (
             <div className="member-list">
               {members.map((member) => (
@@ -2988,6 +3430,16 @@ export default function Portal({
                           {Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                         </select>
                       </label>
+                    )}
+                    {member.id !== user.uid && (
+                      <button
+                        className="text-button danger-button"
+                        disabled={Boolean(deletingMemberId)}
+                        onClick={() => deleteMemberAccount(member)}
+                        type="button"
+                      >
+                        {deletingMemberId === member.id ? "Suppression…" : "Supprimer le compte"}
+                      </button>
                     )}
                   </div>
                 </div>
@@ -3055,6 +3507,7 @@ export default function Portal({
         ? [
             { icon: "▣", count: chats.length, label: "conversations à suivre", tab: "messagerie" },
             { icon: "◷", count: pendingAnnouncements.length, label: "annonces à valider", tab: "entraide" },
+            { icon: "♙", count: members.length, label: "membres", tab: "membres" },
           ]
         : [
             { icon: "♡", count: myAnnouncements.length, label: "mes annonces", tab: "espace" },
@@ -3077,6 +3530,7 @@ export default function Portal({
         ? [
             { label: "Ouvrir les conversations", tab: "messagerie" },
             { label: "Consulter l’annuaire privé", tab: "annuaire" },
+            { label: "Consulter les membres", tab: "membres" },
             { label: "Modérer les annonces", tab: "entraide" },
           ]
         : [
@@ -3140,6 +3594,7 @@ export default function Portal({
     if (activeTab === "messagerie") return renderMessages();
     if (activeTab === "espace") return renderMySpace();
     if (activeTab === "annuaire") return renderDirectory();
+    if (activeTab === "membres" && isPrivileged) return renderMembers();
     if (activeTab === "admin" && isAdmin) return renderAdmin();
     if (activeTab === "ressources") return renderResources();
     return renderHome();
@@ -3156,6 +3611,17 @@ export default function Portal({
           Portail solidaire
         </a>
         <div className="topbar-right">
+          {canInstallApp && (
+            <button
+              aria-label="Installer l’application AEBB"
+              className="button button-small button-secondary pwa-install-button"
+              onClick={onInstallApp}
+              type="button"
+            >
+              <span aria-hidden="true">↓</span>
+              <span className="pwa-install-label">Installer</span>
+            </button>
+          )}
           <span className="role-pill">{roleLabels[profile.role] || profile.role}</span>
           <button className="text-button" onClick={onSignOut} type="button">Déconnexion</button>
         </div>
@@ -3206,6 +3672,7 @@ export default function Portal({
           </a>
         </aside>
         <div className="portal-main">
+          {signupNotice && <FormError>{signupNotice}</FormError>}
           {actionError && <div className="global-action-error"><FormError>{actionError}</FormError></div>}
           {renderContent()}
         </div>
@@ -3217,6 +3684,12 @@ export default function Portal({
         onClose={() => setSelectedAnnouncement(null)}
         onNavigate={onNavigate}
         reservedContact={selectedAnnouncement ? privateContacts[selectedAnnouncement.id]?.telephoneReel : ""}
+        reservedName={selectedAnnouncement
+          ? [
+              privateContacts[selectedAnnouncement.id]?.auteurPrenom,
+              privateContacts[selectedAnnouncement.id]?.auteurNom,
+            ].filter(Boolean).join(" ")
+          : ""}
       />
       <AnnouncementResolutionDialog
         busy={busy}

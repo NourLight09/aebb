@@ -4454,3 +4454,28 @@ input[type="checkbox"] {
     display: inline;
   }
 }
+
+.pwa-install-button {
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.pwa-install-button > span:first-child {
+  font-size: 15px;
+  line-height: 1;
+}
+
+@media (max-width: 430px) {
+  .pwa-install-button {
+    min-width: 38px;
+    padding: 7px 9px;
+  }
+
+  .pwa-install-label {
+    display: none;
+  }
+
+  .public-actions {
+    gap: 10px;
+  }
+}

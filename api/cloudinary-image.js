@@ -25,6 +25,24 @@ function sendError(response, error) {
   });
 }
 
+function cloudinaryPublicIdFromUrl(imageUrl) {
+  try {
+    const url = new URL(imageUrl);
+    if (url.hostname !== "res.cloudinary.com") return null;
+    const uploadPath = url.pathname.split("/upload/")[1];
+    if (!uploadPath) return null;
+    const pathSegments = uploadPath.split("/");
+    const versionIndex = pathSegments.findIndex((segment) => /^v\d+$/.test(segment));
+    return (versionIndex < 0
+      ? pathSegments
+      : pathSegments.slice(versionIndex + 1))
+      .join("/")
+      .replace(/\.[a-z0-9]+$/i, "");
+  } catch {
+    return null;
+  }
+}
+
 export default async function handler(request, response) {
   if (request.method !== "POST") {
     response.setHeader("Allow", "POST");
@@ -49,11 +67,25 @@ export default async function handler(request, response) {
     return response.status(401).json({ error: "Connexion requise." });
   }
 
-  const { action, purpose, assetId } = request.body || {};
+  const {
+    action,
+    purpose,
+    assetId,
+    ownerId,
+    announcementId,
+  } = request.body || {};
+  const hasModerationOwner = ownerId !== undefined || announcementId !== undefined;
   if (!["sign-upload", "delete"].includes(action)
     || !["announcement", "commission"].includes(purpose)
     || typeof assetId !== "string"
-    || !/^[A-Za-z0-9_-]{1,128}$/.test(assetId)) {
+    || !/^[A-Za-z0-9_-]{1,128}$/.test(assetId)
+    || (hasModerationOwner
+      && (action !== "delete"
+        || purpose !== "announcement"
+        || typeof ownerId !== "string"
+        || !/^[A-Za-z0-9_-]{1,128}$/.test(ownerId)
+        || typeof announcementId !== "string"
+        || !/^[A-Za-z0-9_-]{1,128}$/.test(announcementId)))) {
     return response.status(400).json({ error: "Demande d’image invalide." });
   }
 
@@ -68,8 +100,34 @@ export default async function handler(request, response) {
       throw apiError(403, "Vous n’êtes pas autorisé à gérer cette image.");
     }
 
+    let assetOwnerId = uid;
+    if (hasModerationOwner) {
+      if (!["commission", "admin"].includes(role)) {
+        throw apiError(403, "Seule la commission peut supprimer l’image d’une annonce d’un autre membre.");
+      }
+      const [announcement, privateContact] = await Promise.all([
+        readFirestoreDocument(projectId, `annonces/${announcementId}`, idToken),
+        readFirestoreDocument(
+          projectId,
+          `annonces/${announcementId}/prive/contact`,
+          idToken,
+        ),
+      ]);
+      const savedImageId = field(announcement, "imageId") || announcementId;
+      const expectedPublicId = `aebb_announcement_${createHash("sha256")
+        .update(`${ownerId}:${assetId}`)
+        .digest("hex")}`;
+      if (!announcement
+        || field(privateContact, "auteurId") !== ownerId
+        || savedImageId !== assetId
+        || cloudinaryPublicIdFromUrl(field(announcement, "imageUrl")) !== expectedPublicId) {
+        throw apiError(403, "Cette image n’appartient pas à l’annonce à modérer.");
+      }
+      assetOwnerId = ownerId;
+    }
+
     const assetKey = createHash("sha256")
-      .update(`${uid}:${assetId}`)
+      .update(`${assetOwnerId}:${assetId}`)
       .digest("hex");
     const publicId = `aebb_${purpose}_${assetKey}`;
     const timestamp = Math.floor(Date.now() / 1000).toString();

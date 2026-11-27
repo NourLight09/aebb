@@ -6,7 +6,8 @@ import {
 } from "../server/firebase-rest.js";
 
 function isRecent(document) {
-  const timestamp = document?.fields?.createdAt?.timestampValue;
+  const timestamp = document?.fields?.updatedAt?.timestampValue
+    || document?.fields?.createdAt?.timestampValue;
   const age = Date.now() - Date.parse(timestamp || "");
   return Number.isFinite(age) && age >= 0 && age < 24 * 60 * 60 * 1000;
 }
@@ -23,7 +24,7 @@ export default async function handler(request, response) {
   }
 
   const { eventType, documentId, messageId } = request.body || {};
-  if (!["new-announcement", "new-message"].includes(eventType)
+  if (!["new-announcement", "new-message", "new-user"].includes(eventType)
     || typeof documentId !== "string"
     || !/^[A-Za-z0-9_-]{1,128}$/.test(documentId)
     || (eventType === "new-message"
@@ -50,13 +51,18 @@ export default async function handler(request, response) {
     const uid = await verifyUser(idToken, apiKey);
     const profile = await readFirestoreDocument(projectId, `users/${uid}`, idToken);
     const role = field(profile, "role");
-    if ((eventType === "new-message" && role !== "etudiant")
+    if ((eventType === "new-message"
+        && !["etudiant", "commission", "admin"].includes(role))
       || (eventType === "new-announcement"
-        && !["etudiant", "commission", "admin"].includes(role))) {
+        && !["etudiant", "commission", "admin"].includes(role))
+      || (eventType === "new-user"
+        && (documentId !== uid || !isRecent(profile)))) {
       throw apiError(403, "Ce compte n’est pas autorisé à déclencher cette notification.");
     }
 
-    if (eventType === "new-announcement") {
+    if (eventType === "new-user") {
+      // The email intentionally excludes the new member's name and phone number.
+    } else if (eventType === "new-announcement") {
       const announcement = await readFirestoreDocument(
         projectId,
         `annonces/${documentId}`,
@@ -91,10 +97,14 @@ export default async function handler(request, response) {
 
     const subject = eventType === "new-announcement"
       ? "AEBB — annonce à valider"
-      : "AEBB — nouveau message anonyme";
+      : eventType === "new-message"
+        ? "AEBB — nouveau message anonyme"
+        : "AEBB — nouvel utilisateur";
     const dashboardPath = eventType === "new-announcement"
       ? "/dashboard/entraide"
-      : "/dashboard/messagerie";
+      : eventType === "new-message"
+        ? "/dashboard/messagerie"
+        : "/dashboard/membres";
     const portalBaseUrl = process.env.AEBB_PORTAL_URL
       || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
     const portalLink = portalBaseUrl
@@ -102,7 +112,9 @@ export default async function handler(request, response) {
       : "";
     const action = eventType === "new-announcement"
       ? "Une nouvelle annonce (don ou demande) attend la validation d’un membre habilité."
-      : "Un étudiant a envoyé un nouveau message anonyme à la commission.";
+      : eventType === "new-message"
+        ? "Un membre a envoyé un nouveau message anonyme à la commission."
+        : "Un nouveau compte vient d’être créé sur le portail AEBB.";
     const emailResponse = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
       method: "POST",
       headers: {

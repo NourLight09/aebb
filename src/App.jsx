@@ -55,6 +55,9 @@ export default function App() {
   const [members, setMembers] = useState([]);
   const [membersError, setMembersError] = useState("");
   const [membersLoading, setMembersLoading] = useState(false);
+  const [signupNotice, setSignupNotice] = useState("");
+  const [installPromptEvent, setInstallPromptEvent] = useState(null);
+  const [isAppInstalled, setIsAppInstalled] = useState(false);
   const currentPath = path.replace(/\/+$/, "") || "/";
   const mode = currentPath === "/inscription" ? "signup" : "login";
   const isDashboardPath = currentPath === "/dashboard"
@@ -79,6 +82,41 @@ export default function App() {
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
+
+  useEffect(() => {
+    const displayMode = window.matchMedia("(display-mode: standalone)");
+    const updateInstalledState = () => {
+      setIsAppInstalled(
+        displayMode.matches || window.navigator.standalone === true,
+      );
+    };
+    const handleInstallPrompt = (event) => {
+      event.preventDefault();
+      setInstallPromptEvent(event);
+    };
+    const handleAppInstalled = () => {
+      setIsAppInstalled(true);
+      setInstallPromptEvent(null);
+    };
+
+    updateInstalledState();
+    window.addEventListener("beforeinstallprompt", handleInstallPrompt);
+    window.addEventListener("appinstalled", handleAppInstalled);
+    displayMode.addEventListener("change", updateInstalledState);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleInstallPrompt);
+      window.removeEventListener("appinstalled", handleAppInstalled);
+      displayMode.removeEventListener("change", updateInstalledState);
+    };
+  }, []);
+
+  async function handleInstallApp() {
+    if (!installPromptEvent) return;
+    await installPromptEvent.prompt();
+    const choice = await installPromptEvent.userChoice;
+    if (choice.outcome === "accepted") setIsAppInstalled(true);
+    setInstallPromptEvent(null);
+  }
 
   useEffect(() => {
     if (!auth) {
@@ -154,7 +192,7 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    if (!profile || profile.role !== "admin" || !db) {
+    if (!profile || !["commission", "admin"].includes(profile.role) || !db) {
       setMembers([]);
       setMembersError("");
       setMembersLoading(false);
@@ -184,6 +222,7 @@ export default function App() {
   async function handleSubmit(event) {
     event.preventDefault();
     setFormError("");
+    setSignupNotice("");
     setBusy(true);
     try {
       const email = phoneToEmail(phone);
@@ -216,6 +255,28 @@ export default function App() {
           await signOut(auth);
           throw new Error(
             `Compte créé, mais profil non enregistré (${getErrorMessage(error)}). Contactez un administrateur.`,
+          );
+        }
+        try {
+          const response = await fetch("/api/notify", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${await credential.user.getIdToken()}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              eventType: "new-user",
+              documentId: credential.user.uid,
+            }),
+          });
+          const result = await response.json().catch(() => null);
+          if (!response.ok || result?.sent !== true) {
+            throw new Error(result?.error || "Le courriel à l’administration n’a pas été envoyé.");
+          }
+          setSignupNotice("");
+        } catch (notificationError) {
+          setSignupNotice(
+            `Compte créé, mais l’alerte par courriel n’a pas été envoyée : ${getErrorMessage(notificationError)}`,
           );
         }
       } else {
@@ -260,6 +321,8 @@ export default function App() {
         page={currentPath}
         isAuthenticated={Boolean(user)}
         userId={user?.uid}
+        canInstallApp={Boolean(installPromptEvent) && !isAppInstalled}
+        onInstallApp={handleInstallApp}
         onNavigate={navigate}
         onLogin={() => navigate("/connexion")}
         onSignup={() => navigate("/inscription")}
@@ -327,6 +390,9 @@ export default function App() {
         membersError={membersError}
         membersLoading={membersLoading}
         onRoleChange={handleRoleChange}
+        canInstallApp={Boolean(installPromptEvent) && !isAppInstalled}
+        onInstallApp={handleInstallApp}
+        signupNotice={signupNotice}
       />
     );
   }

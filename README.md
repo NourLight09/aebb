@@ -22,39 +22,49 @@ contact et téléversent leur portrait dans **Tableau de bord → Écoute**. Ces
 coordonnées et photos sont affichées publiquement sur `/ecoute`.
 L'inscription demande le prénom et le nom; chaque membre peut ensuite les
 modifier dans **Tableau de bord → Mon espace**. L'administration voit ces
-informations avec le numéro et le pseudo du compte pour attribuer les rôles.
+informations avec le numéro et le pseudo du compte. La commission dispose
+également d’une liste interne des membres, sans pouvoir modifier leurs rôles.
 Les annonces publiques affichent le prénom et le nom; les annonces anonymes
-masquent toujours l'identité et le numéro aux étudiants. Leur vue détaillée
-redirige les autres étudiants vers les contacts publics de la commission.
-Lorsqu'une annonce est clôturée, l'auteur ou la commission indique à qui le don
-a été remis ou de qui l'aide a été reçue. Cette information reste privée, visible
-uniquement par l'auteur et la commission. L'auteur peut aussi supprimer son
-annonce depuis **Mon espace**; cette action retire également son contact privé.
+masquent toujours l'identité et le numéro aux autres étudiants. Seule la
+commission peut voir l’identité de l’auteur et ses coordonnées pour organiser le
+contact. Les auteurs peuvent modifier ou supprimer leurs annonces depuis
+**Mon espace**; une annonce modifiée retourne en attente de validation.
+La commission peut refuser une annonce en attente en la supprimant.
+Lorsqu'une annonce est clôturée, l'auteur ou la commission peut indiquer à qui
+le don a été remis ou de qui l'aide a été reçue. Le nom saisi dans ce suivi est
+stocké séparément et visible uniquement par la commission. L’auteur peut
+confirmer qu’il a reçu le bien sans que le nom renseigné soit affiché dans son
+espace.
 Une annonce déjà résolue sans suivi peut être complétée avec **Ajouter le suivi
-manquant**; le suivi déjà enregistré n'est pas modifiable depuis cette action.
-Les étudiants peuvent démarrer ou reprendre leur discussion anonyme depuis
-**Tableau de bord → Messagerie** ou **Écoute**. Les membres de la commission et
-les admins consultent la boîte commune directement dans **Messagerie**. Les
-admins disposent également d’un accès depuis **Administration**. Chaque nouveau
-message étudiant déclenche un courriel à la commission, mais le contenu du
-message n’est jamais inclus dans le courriel.
+manquant** par la commission; le suivi déjà enregistré n'est pas modifiable
+depuis cette action.
+Tous les comptes — y compris commission et administration — peuvent démarrer
+une conversation en tant que membre sous leur pseudo anonyme. Leur conversation
+personnelle reste distincte de la boîte de réception partagée de la commission.
+Les membres de la commission et les admins consultent et répondent aux autres
+conversations sans révéler leur compte personnel. Chaque nouveau fil anonyme
+et chaque nouveau compte déclenchent un courriel à la boîte configurée dans
+EmailJS; les courriels ne contiennent ni le texte du chat ni les coordonnées du
+nouveau membre.
 La navigation affiche en vert le nombre de conversations contenant un nouveau
 message reçu. Chaque conversation affiche aussi le nombre de messages non lus;
 les anciens fils sont comptés à partir du dernier marqueur de lecture. Le
-compteur est remis à zéro quand la conversation est consultée.
+compteur est remis à zéro quand le fil est réellement ouvert. Sur mobile,
+revenir à la liste laisse les nouveaux messages non lus jusqu'à la réouverture
+du fil.
 Sur mobile, la liste des conversations et le fil s'affichent séparément, avec un
 bouton de retour à la liste et une zone de saisie dédiée au bas du fil.
-La liste des utilisateurs (prénom, nom, numéro, pseudo et rôle) est réservée au
-rôle `admin` et se met à jour en direct. Les comptes sont présentés avec une
-hiérarchie d'identité et un sélecteur de rôle adapté aux petits écrans.
+La liste des utilisateurs (prénom, nom, numéro, pseudo et rôle) est réservée à
+la commission et à l’administration et se met à jour en direct. Seul
+l’administrateur peut modifier les rôles ou supprimer un compte.
 Dans l'annuaire privé, la commission peut filtrer les fiches par hébergement,
 colocation ou emploi; les libellés de catégories restent explicites dans les
 fiches et dans l'espace personnel de l'étudiant.
 Les conversations démarrées sur le site sont adressées à la boîte commune
-« Commission sociale » : l’étudiant ne choisit pas le membre qui répond, et les
-réponses sont affichées sous ce nom générique. Tous les comptes `commission` et
-`admin` peuvent consulter et traiter cette boîte. Pour joindre une personne
-précise, l’étudiant utilise son contact WhatsApp public.
+« Commission sociale » : le membre ne choisit pas qui répond, et les réponses
+sont affichées sous ce nom générique. Tous les comptes `commission` et `admin`
+peuvent consulter et traiter cette boîte. Pour joindre une personne précise,
+l’étudiant utilise son contact WhatsApp public.
 Les fiches de démonstration restent fictives, sans photo ni contact réel, et ne
 peuvent pas être contactées directement. Une fiche publique n’est pas nécessaire
 pour répondre dans la boîte anonyme.
@@ -81,8 +91,9 @@ d’environnement Vercel, renseignez :
 Les variables `VITE_FIREBASE_API_KEY` et `VITE_FIREBASE_PROJECT_ID` doivent
 également être configurées comme pour l’application. Ne préfixez jamais la clé
 privée EmailJS par `VITE_` et ne la commitez pas. Les courriels signalent une
-annonce à valider ou un nouveau message étudiant; ils ne contiennent ni le texte
-du chat ni le numéro de l’étudiant. Aucun courriel n’est envoyé lorsqu’un
+annonce à valider, un nouveau compte ou un nouveau message anonyme; ils ne
+contiennent ni le texte du chat ni les coordonnées du nouveau membre. Aucun
+courriel n’est envoyé lorsqu’un
 étudiant ouvre simplement une conversation sans encore écrire. Chaque nouveau
 fil est distinct; un seul courriel est envoyé à la commission, après le premier
 message étudiant de ce fil. Les messages suivants ne déclenchent pas d’autre
@@ -205,3 +216,23 @@ aussi `VITE_SUPPORT_WHATSAPP` si vous souhaitez activer le lien de réinitialisa
 Ajoutez également les variables Cloudinary et EmailJS décrites ci-dessus pour
 activer les envois de photos et les notifications.
 Vercel construit l'application avec `npm run build` et publie le dossier `dist`.
+
+La suppression complète d’un compte utilise Firebase Admin côté serveur.
+Ajoutez `FIREBASE_SERVICE_ACCOUNT` comme variable d’environnement secrète
+Vercel, avec le JSON du compte de service Firebase du projet. Ce compte doit
+avoir les droits d’administration d’Authentication et Firestore. Ne mettez
+jamais cette clé dans une variable `VITE_*`, dans le dépôt ou dans le navigateur.
+La suppression retire le compte Firebase, ses annonces et fiches, ses
+conversations et ses photos Cloudinary; elle est refusée pour le dernier compte
+administrateur.
+
+## Installation sur téléphone
+
+Le portail peut être installé comme application depuis un navigateur compatible.
+Sur Android et les navigateurs de bureau compatibles, utilisez **Installer**
+quand le bouton apparaît, ou l'option d'installation du menu du navigateur.
+Sur iPhone/iPad, ouvrez le portail dans Safari, touchez **Partager**, puis
+**Sur l’écran d’accueil**. L'installation nécessite le site en HTTPS, comme
+sur Vercel. La page et ses ressources déjà chargées restent accessibles hors
+ligne, mais la connexion, les annonces et la messagerie Firebase nécessitent
+Internet.
