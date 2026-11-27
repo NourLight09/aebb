@@ -31,8 +31,8 @@ const directoryCategories = [
   { id: "emploi", label: "Recherche de job étudiant" },
 ];
 
-function directoryCategoryLabel(type) {
-  return directoryCategories.find((category) => category.id === type)?.label
+function directoryCategoryLabel(type, categories = directoryCategories) {
+  return categories.find((category) => category.id === type)?.label
     || type
     || "Catégorie inconnue";
 }
@@ -824,7 +824,7 @@ export function PublicPortal({
           onClick={() => setSelectedAnnouncement(item)}
           type="button"
         >
-          {own ? "Voir les détails" : "Voir les détails et le contact"}
+          {own ? "Lire la suite" : "Lire la suite · détails et contact"}
         </button>
         {whatsapp && !own && (
           <a className="contact-link" href={whatsapp} rel="noreferrer" target="_blank">
@@ -1082,6 +1082,11 @@ export default function Portal({
   const [directoryEntries, setDirectoryEntries] = useState([]);
   const [myDirectoryEntries, setMyDirectoryEntries] = useState([]);
   const [directoryError, setDirectoryError] = useState("");
+  const [customDirectoryCategories, setCustomDirectoryCategories] = useState([]);
+  const [directoryCategoriesError, setDirectoryCategoriesError] = useState("");
+  const [directoryCategoryName, setDirectoryCategoryName] = useState("");
+  const [directoryCategoryActionError, setDirectoryCategoryActionError] = useState("");
+  const [directoryCategoryActionNotice, setDirectoryCategoryActionNotice] = useState("");
   const [directoryLoading, setDirectoryLoading] = useState(false);
   const [actionError, setActionError] = useState("");
   const [actionNotice, setActionNotice] = useState("");
@@ -1133,6 +1138,7 @@ export default function Portal({
     : [];
   const allCommissionProfiles = [...commissionProfiles, ...demoCommissionProfiles]
     .sort((a, b) => (a.nom || "").localeCompare(b.nom || "", "fr"));
+  const allDirectoryCategories = [...directoryCategories, ...customDirectoryCategories];
   const isPrivileged = ["commission", "admin"].includes(profile.role);
   const isAdmin = profile.role === "admin";
   const visibleTabs = tabs.filter(
@@ -1293,6 +1299,19 @@ export default function Portal({
     );
     return unsubscribe;
   }, [user.uid]);
+
+  useEffect(() => onSnapshot(
+    collection(db, "categories_aide"),
+    (snapshot) => {
+      setCustomDirectoryCategories(snapshot.docs.map((categoryDoc) => ({
+        id: categoryDoc.id,
+        label: categoryDoc.data().label,
+        custom: true,
+      })));
+      setDirectoryCategoriesError("");
+    },
+    (error) => setDirectoryCategoriesError(errorText(error)),
+  ), []);
 
   useEffect(() => {
     if (!isPrivileged) {
@@ -2290,6 +2309,38 @@ export default function Portal({
     }
   }
 
+  async function createDirectoryCategory(event) {
+    event.preventDefault();
+    setDirectoryCategoryActionError("");
+    setDirectoryCategoryActionNotice("");
+    const label = directoryCategoryName.trim();
+    if (!label || label.length > 80) {
+      setDirectoryCategoryActionError("Le nom de la catégorie doit contenir entre 1 et 80 caractères.");
+      return;
+    }
+    if (allDirectoryCategories.some(
+      (category) => category.label.toLocaleLowerCase("fr") === label.toLocaleLowerCase("fr"),
+    )) {
+      setDirectoryCategoryActionError("Cette catégorie existe déjà.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const categoryRef = doc(collection(db, "categories_aide"));
+      await setDoc(categoryRef, {
+        label,
+        createdAt: serverTimestamp(),
+      });
+      setDirectoryCategoryName("");
+      setDirectoryCategoryActionNotice("La catégorie est disponible dans les propositions d’aide.");
+    } catch (error) {
+      setDirectoryCategoryActionError(errorText(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function toggleDirectoryEntry(entry) {
     setDirectoryError("");
     try {
@@ -2373,7 +2424,7 @@ export default function Portal({
           onClick={() => setSelectedAnnouncement(item)}
           type="button"
         >
-          {isOwn ? "Voir les détails" : "Voir les détails et le contact"}
+          {isOwn ? "Lire la suite" : "Lire la suite · détails et contact"}
         </button>
         {isPrivileged && item.estAnonyme && reservedContact && (
           <div className="reserved-contact">
@@ -3164,7 +3215,7 @@ export default function Portal({
                 {myDirectoryEntries.map((entry) => (
                   <div className="my-entry-row" key={entry.id}>
                     <div>
-                      <strong>{directoryCategoryLabel(entry.type)}</strong>
+                      <strong>{directoryCategoryLabel(entry.type, allDirectoryCategories)}</strong>
                       <span>{entry.quartier || "Besançon"} · {entry.disponible ? "Disponible" : "Suspendue"}</span>
                       <small>{entry.details}</small>
                     </div>
@@ -3193,6 +3244,7 @@ export default function Portal({
             : "Transmettez vos disponibilités à la commission. Votre fiche et vos coordonnées ne seront pas visibles par les autres étudiants."}
           action={isPrivileged ? <span className="role-pill">Accès commission</span> : null}
         />
+        {directoryCategoriesError && <FormError>{directoryCategoriesError}</FormError>}
         <section className="card form-card">
           <h3>Proposer une aide ou signaler un besoin</h3>
           <p className="muted">Votre fiche sera consultable uniquement par la commission. Ne partagez que les informations nécessaires.</p>
@@ -3200,9 +3252,9 @@ export default function Portal({
             <label>
               Type de proposition
               <select onChange={(event) => setDirectoryForm((current) => ({ ...current, type: event.target.value }))} value={directoryForm.type}>
-                <option value="hebergement">Hébergement temporaire</option>
-                <option value="colocation">Colocation / logement</option>
-                <option value="emploi">Recherche de job étudiant</option>
+                {allDirectoryCategories.map((category) => (
+                  <option key={category.id} value={category.id}>{category.label}</option>
+                ))}
               </select>
             </label>
             <label>
@@ -3254,7 +3306,7 @@ export default function Portal({
                 >
                   Toutes ({activeDirectoryEntries.length})
                 </button>
-                {directoryCategories.map((category) => {
+                {allDirectoryCategories.map((category) => {
                   const count = activeDirectoryEntries.filter((entry) => entry.type === category.id).length;
                   return (
                     <button
@@ -3273,7 +3325,7 @@ export default function Portal({
               {filteredDirectoryEntries.map((entry) => (
                 <article className="directory-entry" key={entry.id}>
                   <div className="announcement-topline">
-                    <span className="category-pill">{directoryCategoryLabel(entry.type)}</span>
+                    <span className="category-pill">{directoryCategoryLabel(entry.type, allDirectoryCategories)}</span>
                     {entry.quartier && <span className="muted">{entry.quartier}</span>}
                   </div>
                   <h3>{entry.nom}</h3>
@@ -3401,6 +3453,42 @@ export default function Portal({
         <section className="card admin-card">
           <div className="space-section-heading">
             <div>
+              <h3>Catégories des propositions d’aide</h3>
+              <p className="muted">Ajoutez des choix au formulaire « Proposer une aide ». Les catégories des dons et demandes restent inchangées.</p>
+            </div>
+            <span className="count-pill">{allDirectoryCategories.length} catégorie(s)</span>
+          </div>
+          {directoryCategoriesError && <FormError>{directoryCategoriesError}</FormError>}
+          <form className="portal-form category-admin-form" onSubmit={createDirectoryCategory}>
+            <label>
+              Nouvelle catégorie
+              <input
+                maxLength={80}
+                onChange={(event) => setDirectoryCategoryName(event.target.value)}
+                placeholder="Ex. Aide aux courses"
+                required
+                value={directoryCategoryName}
+              />
+            </label>
+            {directoryCategoryActionError && <FormError>{directoryCategoryActionError}</FormError>}
+            {directoryCategoryActionNotice && (
+              <p className="success-message" role="status">{directoryCategoryActionNotice}</p>
+            )}
+            <button className="button button-small button-primary" disabled={busy} type="submit">
+              {busy ? "Création…" : "Créer la catégorie"}
+            </button>
+          </form>
+          <div className="directory-filters category-admin-list" aria-label="Catégories disponibles">
+            {allDirectoryCategories.map((category) => (
+              <span className="directory-filter active" key={category.id}>
+                {category.label}{category.custom ? " · personnalisée" : " · par défaut"}
+              </span>
+            ))}
+          </div>
+        </section>
+        <section className="card admin-card">
+          <div className="space-section-heading">
+            <div>
               <h3>Comptes utilisateurs</h3>
               <span className="muted">{members.length} compte(s), actualisés en direct</span>
             </div>
@@ -3521,10 +3609,12 @@ export default function Portal({
         : "Suivez vos échanges et retrouvez ici les outils pour participer à votre rythme.";
     const dashboardActions = isAdmin
       ? [
-          { label: "Gérer les rôles", tab: "admin" },
-          { label: "Ouvrir la messagerie", tab: "messagerie" },
-          { label: "Ouvrir l’annuaire privé", tab: "annuaire" },
-          { label: "Valider les annonces", tab: "entraide" },
+          { label: "Gérer les rôles et catégories", tab: "admin" },
+          { label: "Publier ou valider une annonce", tab: "entraide" },
+          { label: "Proposer une aide / ouvrir l’annuaire", tab: "annuaire" },
+          { label: "Mon espace étudiant", tab: "espace" },
+          { label: "Créer ou modifier ma fiche commission", tab: "ecoute" },
+          { label: "Messagerie anonyme", tab: "messagerie" },
         ]
       : isPrivileged
         ? [

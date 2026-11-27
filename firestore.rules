@@ -43,6 +43,13 @@ service cloud.firestore {
         && get(contactPath).data.auteurId == request.auth.uid;
     }
 
+    function validAidCategory(categoryId) {
+      return categoryId is string
+        && categoryId.matches('^[A-Za-z0-9_-]{1,128}$')
+        && (categoryId in ['hebergement', 'colocation', 'emploi']
+          || exists(/databases/$(database)/documents/categories_aide/$(categoryId)));
+    }
+
     function announcementAuthorId(annonceId) {
       return get(
         /databases/$(database)/documents/annonces/$(annonceId)/prive/contact
@@ -541,6 +548,17 @@ service cloud.firestore {
       }
     }
 
+    match /categories_aide/{categoryId} {
+      allow read: if signedIn();
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(['label', 'createdAt'])
+        && request.resource.data.label is string
+        && request.resource.data.label.size() > 0
+        && request.resource.data.label.size() <= 80
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
     match /annuaire_solidaire/{entryId} {
       allow read: if isCommission();
 
@@ -550,7 +568,7 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly([
           'type', 'userId', 'nom', 'telephone', 'quartier', 'details', 'disponible'
         ])
-        && request.resource.data.type in ['hebergement', 'colocation', 'emploi']
+        && validAidCategory(request.resource.data.type)
         && request.resource.data.nom is string
         && request.resource.data.nom.size() > 0
         && request.resource.data.nom.size() <= 100
@@ -574,7 +592,7 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly([
           'type', 'userId', 'nom', 'telephone', 'quartier', 'details', 'disponible'
         ])
-        && request.resource.data.type in ['hebergement', 'colocation', 'emploi']
+        && validAidCategory(request.resource.data.type)
         && request.resource.data.nom is string
         && request.resource.data.nom.size() > 0
         && request.resource.data.nom.size() <= 100

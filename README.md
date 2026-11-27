@@ -57,9 +57,10 @@ bouton de retour à la liste et une zone de saisie dédiée au bas du fil.
 La liste des utilisateurs (prénom, nom, numéro, pseudo et rôle) est réservée à
 la commission et à l’administration et se met à jour en direct. Seul
 l’administrateur peut modifier les rôles ou supprimer un compte.
-Dans l'annuaire privé, la commission peut filtrer les fiches par hébergement,
-colocation ou emploi; les libellés de catégories restent explicites dans les
-fiches et dans l'espace personnel de l'étudiant.
+Dans l'annuaire privé, la commission peut filtrer les fiches par catégorie.
+Les catégories intégrées couvrent l'hébergement, la colocation et l'emploi;
+l’administrateur peut ajouter des catégories pour les propositions d’aide
+depuis **Administration**. Les dons et demandes n’ont pas de catégorie.
 Les conversations démarrées sur le site sont adressées à la boîte commune
 « Commission sociale » : le membre ne choisit pas qui répond, et les réponses
 sont affichées sous ce nom générique. Tous les comptes `commission` et `admin`

@@ -894,6 +894,13 @@ code {
   overflow-wrap: anywhere;
 }
 
+.announcement-card .announcement-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  overflow: hidden;
+}
+
 .announcement-meta {
   display: flex;
   flex-wrap: wrap;
